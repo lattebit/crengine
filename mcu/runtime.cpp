@@ -152,6 +152,24 @@ void cre_mcu_release(void *data) {
     stats.used -= h->block.bytes;
     h->block.release(h->block.context, h);
 }
+static void *imageResize(void *data, size_t bytes) {
+    if (!bytes) { cre_mcu_release(data); return nullptr; }
+    void *next = cre_mcu_allocate(bytes); if (!next) return nullptr;
+    if (data) {
+        auto *h = static_cast<Header *>(data) - 1;
+        std::memcpy(next, data, std::min(bytes, h->block.bytes - sizeof(Header)));
+        cre_mcu_release(data);
+    }
+    return next;
+}
+static void imageYield() { if (platform.yield) platform.yield(platform.context); }
+static int imageCancelled() { return platform.cancelled && platform.cancelled(platform.context); }
+int cre_mcu_decode_image(const uint8_t *data, size_t bytes, uint32_t width, uint32_t height, cre_mcu_bitmap *out) {
+    *out = {};
+    if (!platform.decode_image) return CRE_CONTENT;
+    const cre_mcu_image_memory memory{cre_mcu_allocate, imageResize, cre_mcu_release, imageYield, imageCancelled};
+    return platform.decode_image(platform.context, data, bytes, width, height, &memory, out);
+}
 void cre_mcu_checkpoint() {
     if (platform.cancelled && platform.cancelled(platform.context)) throw CreMcuFailure{CRE_CANCELLED};
     if (platform.yield) platform.yield(platform.context);

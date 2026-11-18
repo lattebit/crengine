@@ -13,6 +13,9 @@
 *******************************************************/
 
 #include "crsetup.h"
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -2365,6 +2368,13 @@ LVImageSourceRef LVCreateStreamImageSource( LVStreamRef stream, ldomDocument * d
         return ref;
     stream->SetPos( 0 );
 
+#ifdef CR_MCU
+    // 中文：宿主复用固件解码器；尺寸探测不申请整幅彩色缓冲。
+    // English: Reuse firmware decoders; dimension probing never allocates a full color bitmap.
+    if ((bytesRead >= 8 && !memcmp(hdr, "\x89PNG\r\n\x1a\n", 8)) ||
+        (bytesRead >= 2 && hdr[0] == 0xff && hdr[1] == 0xd8))
+        return LVImageSourceRef(cre_mcu_image_source(stream, doc, node));
+#endif
 
     LVImageSource * img = NULL;
 #if (USE_LIBPNG==1)

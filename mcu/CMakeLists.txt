@@ -36,7 +36,7 @@ file(GLOB CRE_HEADERS CONFIGURE_DEPENDS "${CRE_ROOT}/crengine/include/*.h" "${CM
 file(GLOB_RECURSE CRE_PORTS CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/ports/*")
 set(CRE_ID_INPUTS ${CRE_MCU_SOURCES} ${CRE_HEADERS} ${CRE_PORTS}
     "${CMAKE_CURRENT_LIST_FILE}" "${CMAKE_CURRENT_LIST_DIR}/dependencies.cmake"
-    "${CMAKE_CURRENT_LIST_DIR}/runtime.cpp" "${CMAKE_CURRENT_LIST_DIR}/document.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/runtime.cpp" "${CMAKE_CURRENT_LIST_DIR}/document.cpp" "${CMAKE_CURRENT_LIST_DIR}/image.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/crsetup.h.in" "${CMAKE_CURRENT_LIST_DIR}/cre_stylesheets.h.in")
 set(CRE_ID_MATERIAL "${CRE_HTML_CSS}${CRE_EPUB_CSS}${CRE_FB2_CSS}${CRE_TXT_CSS}")
 foreach(input IN LISTS CRE_ID_INPUTS)
@@ -52,7 +52,7 @@ string(SUBSTRING "${CRE_BUILD_HASH}" 0 16 CRE_BUILD_ID)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/cre_identity.h" "#define CRE_BUILD_ID UINT64_C(0x${CRE_BUILD_ID})\n")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CRE_ID_INPUTS})
 add_library(crengine_mcu STATIC ${CRE_MCU_SOURCES}
-    "${CRE_ROOT}/crengine/qimagescale/qimagescale.cpp" runtime.cpp document.cpp)
+    "${CRE_ROOT}/crengine/qimagescale/qimagescale.cpp" runtime.cpp document.cpp image.cpp)
 add_library(crengine::mcu ALIAS crengine_mcu)
 target_include_directories(crengine_mcu PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" "${CRE_ROOT}/crengine/include" "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(crengine_mcu PRIVATE "${CRE_DEPS}/nanosvg/src")
@@ -64,6 +64,10 @@ target_link_libraries(crengine_mcu PUBLIC cre_freetype cre_harfbuzz cre_fribidi
 set_target_properties(crengine_mcu PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    add_executable(cre_mcu_image_test tests/image.cpp)
+    target_link_libraries(cre_mcu_image_test PRIVATE crengine_mcu)
+    target_compile_options(cre_mcu_image_test PRIVATE -UNDEBUG)
+    add_test(NAME mcu_image COMMAND cre_mcu_image_test)
     add_executable(cre_mcu_font_test tests/font_preview.cpp)
     target_link_libraries(cre_mcu_font_test PRIVATE crengine_mcu)
     target_compile_options(cre_mcu_font_test PRIVATE -UNDEBUG)

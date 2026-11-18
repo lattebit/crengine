@@ -32,12 +32,15 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 - `cre_document_toc`、`resolve`、`prepare` 使用章节和内容路径，不使用全书页号作为持久进度。宿主借用像素期间必须保证缓冲不被重新使用。
 - 关闭顺序为文档、字体后端、平台上下文。取消检查会抛出内部异常，不能从平台的 C 回调抛出异常。
 - 当前预算统计覆盖 FreeType、共享字体源和灰阶临时缓冲。核心 DOM、C++ 对象及部分依赖分配尚未统一纳入该统计；宿主不能把此统计当作整个引擎的内存峰值或完整硬预算。
+- JPEG/PNG 仅做流式尺寸探测，实际像素由 `decode_image` 平台回调使用给定预算分配器生成。回调返回连续八位灰阶，端口按目标尺寸逐行交给绘图层；不需要完整彩色位图。`cre_document_image` 可准备文档内图片，保持正文位置。
 
 `cre_mcu_initialize` starts fonts; previews do not create a document. Font sources share four 4 KiB blocks per path and close at their final reference. `cre_document_open` admits one active document. EPUB indexes survive chapter changes without retaining chapter DOM nodes. `prepare` currently completes layout of the selected chapter synchronously; its completion flag describes that chapter, not the whole book. The host owns packed 4bpp pixels and their borrowing lifetime. Close documents before fonts and platform context. Budget statistics currently cover FreeType, shared sources and grayscale scratch buffers, **not all DOM, C++ or dependency allocations**.
 
 `cre_mcu_build_identity()` 无初始化副作用，身份包含构建源码、依赖提交、裁剪选项和用户代理样式，可直接用作字体与布局缓存身份的一部分。修改编译选项时应同步修改 `crsetup.h.in` 或依赖构建入口，使身份随行为变化。
 
 `cre_mcu_build_identity()` requires no initialization. Its source/dependency/configuration/style fingerprint belongs in font and layout cache keys. Keep build options in the checked build inputs so behavior changes invalidate the identity.
+
+JPEG/PNG dimensions are probed from streams. The optional `decode_image` callback returns contiguous grayscale bytes through the supplied budgeted allocator. The port emits target-sized rows without a full color bitmap; `cre_document_image` prepares a resource without advancing the body anchor.
 
 ## 裁剪与维护 / Trimming and maintenance
 
@@ -48,6 +51,7 @@ The build excludes system font discovery, mmap, signal handling, color page back
 - `ports/ftbase.c` 和 `fthash.c` 来自固定 FreeType 提交，保留原许可；后者处理分配失败后的空表清理。`cre_ftoptions.h` / `cre_ftmodule.h` 仅配置模块，不修改第三方检出。
 - `ports/utf8proc.c` 来自固定 utf8proc 提交，修正 S31 上 `int32_t` 为 `long` 时与 `int *` 状态接口的类型不一致。
 - `ports/fribidi` 表由同一 submodule 的 Unicode 输入生成，更新版本时运行 `python3 mcu/generate_fribidi.py`，不要手工改表。
+- FriBidi 只编译 Unicode 排序需要的模块。`ports/harfbuzz.cc` 在加载标准库后隔离 Picolibc `_S` 宏，避免污染 HarfBuzz 的字符串表宏。
 - `cr3gui/data` 中的上游样式在配置时嵌入，保持 EPUB 章节分页、HTML 表格及列表语义；无需在设备上部署 CSS 文件。
 
 Port copies retain their upstream licenses. The FreeType hash port fixes allocation-failure cleanup; utf8proc bridges its public `int *` state to a local `utf8proc_int32_t` on S31. Regenerate FriBidi tables with `python3 mcu/generate_fribidi.py` after upgrading its pinned sources. Upstream user-agent CSS is embedded at configuration time.

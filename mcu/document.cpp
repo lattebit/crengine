@@ -261,6 +261,25 @@ extern "C" int cre_document_cover(cre_document *d, uint8_t *pixels, size_t capac
     if (!d) return CRE_INVALID;
     return boundary([&]() -> int { int result = load(*d, d->chapter == UINT32_MAX ? 0 : d->chapter); return result == CRE_OK ? render(*d, pixels, capacity, true) : result; });
 }
+extern "C" int cre_document_image(cre_document *d, const char *href, uint8_t *pixels, size_t capacity) {
+    if (!d || !href || !*href || std::strlen(href) >= 768 || !pixels || capacity < size_t(d->layout.width / 2) * d->layout.height) return CRE_INVALID;
+    return boundary([&]() -> int {
+        int rc = load(*d, d->chapter == UINT32_MAX ? 0 : d->chapter); if (rc != CRE_OK) return rc;
+        auto image = d->view->getDocument()->getObjectImageSource(Utf8ToUnicode(href));
+        if (image.isNull() || image->GetWidth() <= 0 || image->GetHeight() <= 0) return CRE_CONTENT;
+        int w = d->layout.width, h = uint64_t(image->GetHeight()) * w / image->GetWidth();
+        if (h > int(d->layout.height)) { h = d->layout.height; w = uint64_t(image->GetWidth()) * h / image->GetHeight(); }
+        w = std::max(1, w); h = std::max(1, h);
+        std::unique_ptr<uint8_t, decltype(&cre_mcu_release)> scratch(static_cast<uint8_t *>(cre_mcu_allocate(size_t(d->layout.width) * d->layout.height)), cre_mcu_release);
+        if (!scratch) return CRE_MEMORY;
+        LVGrayDrawBuf buffer(d->layout.width, d->layout.height, 8, scratch.get()); buffer.Clear(0xffffff);
+        buffer.Draw(image, (d->layout.width - w) / 2, (d->layout.height - h) / 2, w, h, false);
+        cre_mcu_checkpoint();
+        for (size_t i = 0; i < size_t(d->layout.width) * d->layout.height; i += 2)
+            pixels[i / 2] = (scratch.get()[i] & 0xf0) | (scratch.get()[i + 1] >> 4);
+        return CRE_OK;
+    });
+}
 extern "C" int cre_document_hit(cre_document *d, int32_t x, int32_t y, char *href, size_t capacity, uint32_t *image) {
     if (!d || !d->view || !href || !capacity || !image || x < 0 || y < 0 || static_cast<uint32_t>(x) >= d->layout.width || static_cast<uint32_t>(y) >= d->layout.height) return CRE_INVALID;
     *href = 0; *image = 0;

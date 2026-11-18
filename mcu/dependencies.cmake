@@ -19,17 +19,17 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREAT
     set_source_files_properties("${CRE_DEPS}/freetype/src/smooth/smooth.c" PROPERTIES COMPILE_OPTIONS "-Wno-error=dangling-pointer")
 endif()
 
-add_library(cre_harfbuzz STATIC "${CRE_DEPS}/harfbuzz/src/harfbuzz.cc")
+add_library(cre_harfbuzz STATIC "${CRE_PORTS}/harfbuzz.cc")
 target_include_directories(cre_harfbuzz PUBLIC "${CRE_DEPS}/harfbuzz/src")
 target_compile_definitions(cre_harfbuzz PRIVATE HAVE_FREETYPE HB_NO_MT HB_NO_MMAP
     HB_NO_ATEXIT HB_NO_SUBSET HB_NO_PAINT HB_NO_COLOR)
 target_compile_features(cre_harfbuzz PRIVATE cxx_std_17)
 target_link_libraries(cre_harfbuzz PUBLIC cre_freetype)
 
+# 中文：引擎直接传入 Unicode，移除 FriBidi 的命令行字符集转换和弃用 API。
+# English: The engine passes Unicode directly; omit FriBidi command-line charset conversion and deprecated APIs.
 set(CRE_FRIBIDI_SOURCES fribidi fribidi-arabic fribidi-bidi fribidi-bidi-types
-    fribidi-brackets fribidi-char-sets fribidi-char-sets-cap-rtl fribidi-char-sets-cp1255
-    fribidi-char-sets-cp1256 fribidi-char-sets-iso8859-6 fribidi-char-sets-iso8859-8
-    fribidi-char-sets-utf8 fribidi-deprecated fribidi-joining fribidi-joining-types
+    fribidi-brackets fribidi-joining fribidi-joining-types
     fribidi-mirroring fribidi-run fribidi-shape)
 list(TRANSFORM CRE_FRIBIDI_SOURCES PREPEND "${CRE_DEPS}/fribidi/lib/")
 list(TRANSFORM CRE_FRIBIDI_SOURCES APPEND ".c")

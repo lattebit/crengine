@@ -40,5 +40,5 @@ static void closeFile(void *context, void *file) {
 }
 static int cancelled(void *context) { auto &p = *static_cast<Platform *>(context); return p.cancel || p.checkpoints++ >= p.cancel_at; }
 static cre_mcu_platform_t config(Platform &p) {
-    return {&p, allocate, release, openFile, readAt, closeFile, cancelled, nullptr, 2u * 1024u * 1024u};
+    return {&p, allocate, release, openFile, readAt, closeFile, cancelled, nullptr, 2u * 1024u * 1024u, nullptr};
 }

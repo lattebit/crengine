@@ -19,6 +19,17 @@ enum {
     CRE_BUSY = -6 ///< 资源仍在使用 / Resources remain in use
 };
 typedef struct {
+    void *(*allocate)(size_t); ///< 同一引擎预算 / Shared engine allocation budget
+    void *(*resize)(void *, size_t); ///< 失败保留旧块 / Preserve the old allocation on failure
+    void (*release)(void *); ///< 配对释放 / Matching release
+    void (*yield)(void); ///< 协作让行，不抛异常 / Cooperative yield without exceptions
+    int (*cancelled)(void); ///< 取消检查，不抛异常 / Cancellation check without exceptions
+} cre_mcu_image_memory;
+typedef struct {
+    uint8_t *pixels; ///< 分配器拥有的连续八位灰阶 / Allocator-owned contiguous grayscale bytes
+    uint32_t width, height; ///< 实际解码尺寸 / Actual decoded dimensions
+} cre_mcu_bitmap;
+typedef struct {
     void *context; ///< 平台上下文 / Platform context
     void *(*allocate)(void *, size_t); ///< PSRAM 优先，返回自然对齐地址 / Prefer PSRAM and return naturally aligned storage
     void (*release)(void *, void *); ///< 与 allocate 配对 / Pair with allocate
@@ -28,6 +39,8 @@ typedef struct {
     int (*cancelled)(void *); ///< 工作任务安全点，非零取消 / Worker checkpoint; nonzero cancels
     void (*yield)(void *); ///< 可选协作让行 / Optional cooperative yield
     size_t memory_limit; ///< 引擎可跟踪分配的硬预算 / Hard budget for tracked engine allocations
+    int (*decode_image)(void *, const uint8_t *, size_t, uint32_t, uint32_t,
+                        const cre_mcu_image_memory *, cre_mcu_bitmap *); ///< 可选宿主 JPEG/PNG 解码，必须使用给定分配器 / Optional host JPEG/PNG decoding using the supplied allocator
 } cre_mcu_platform_t;
 typedef struct {
     size_t used, peak, limit; ///< 当前、峰值和预算字节 / Current, peak and budget bytes

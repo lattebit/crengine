@@ -54,6 +54,8 @@ int cre_document_toc(cre_document *document, uint32_t first, cre_toc_entry *out,
 int cre_document_text(cre_document *document, char *out, size_t capacity);
 /// 封面使用同一灰阶输出；没有封面返回 CRE_CONTENT。/ Use the same grayscale output for a cover; missing covers return CRE_CONTENT.
 int cre_document_cover(cre_document *document, uint8_t *pixels, size_t capacity);
+/// 准备当前文档内图片，保持正文布局和内容锚点。/ Prepare an in-document image while retaining body layout and anchor.
+int cre_document_image(cre_document *document, const char *href, uint8_t *pixels, size_t capacity);
 /// 返回当前页点击位置的链接或图片路径。/ Return the link or image resource at a point on the current page.
 int cre_document_hit(cre_document *document, int32_t x, int32_t y, char *href, size_t capacity, uint32_t *image);
 /// 借用本次准备结果的命中区域，下一次引擎调用前必须复制。/ Borrow prepared hit areas; copy them before the next engine call.
