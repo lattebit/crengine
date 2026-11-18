@@ -291,7 +291,8 @@ LVStreamRef cre_mcu_font_stream(LVStreamRef source) {
 }
 FT_Error cre_mcu_new_stream_face(FT_Library library, LVStreamRef source, FT_Long index, FT_Face *out) {
     *out = nullptr;
-    if (source.isNull() || source->GetSize() > ULONG_MAX) return FT_Err_Invalid_Argument;
+    static_assert(sizeof(lvsize_t) <= sizeof(FT_ULong), "MCU streams fit FreeType offsets");
+    if (source.isNull()) return FT_Err_Invalid_Argument;
     void *storage = cre_mcu_allocate(sizeof(EmbeddedFaceStream));
     if (!storage) return FT_Err_Out_Of_Memory;
     auto *face = new (storage) EmbeddedFaceStream;

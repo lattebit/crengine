@@ -110,6 +110,9 @@ ctest --test-dir build/mcu-test --output-on-failure
 
 Fixtures cover six formats, meaningful grayscale content, chapter-versus-full EPUB pixels, direct Markdown DOM versus MD4C HTML pixels, C-port anchors/links, and preview fault cleanup. The Markdown comparison explicitly aligns H1 pagination to remove the upstream `html-document` format-specific difference. Use a font covering CJK and Latin when checking multilingual pixels.
 
+中文禁则测试检查真实字符坐标，覆盖十三种行宽下的行首行尾标点、组合音符、成对破折号和省略号及不可断空格。嵌入字体测试对照普通字体的多字号像素，并验证分块读取、共享读取缓存和失败清理。
+Typography tests inspect real character positions across thirteen widths for opening/closing punctuation, combining marks, paired dashes/ellipses and nonbreaking spaces. Embedded-font tests compare ordinary-font pixels at multiple sizes and verify chunked reads, shared read caching and failure cleanup.
+
 Linux sanitizer 构建额外传入以下三个选项，然后运行相同 CTest：
 For Linux sanitizer builds, add these options and run the same CTest suite:
 
