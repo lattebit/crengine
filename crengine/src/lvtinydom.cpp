@@ -1025,6 +1025,7 @@ bool CacheFile::validate( CacheFileItem * block )
     // read block from file
     size = block->_dataSize;
     buf = (lUInt8 *)malloc(size);
+    if (!buf) { size = 0; return false; }
     lvsize_t bytesRead = 0;
     _stream->Read(buf, size, &bytesRead );
     if ( bytesRead!=size ) {
@@ -1060,6 +1061,7 @@ bool CacheFile::read( lUInt16 type, lUInt16 dataIndex, lUInt8 * &buf, int &size 
     // read block from file
     size = block->_dataSize;
     buf = (lUInt8 *)malloc(size);
+    if (!buf) { size = 0; return false; }
     lvsize_t bytesRead = 0;
     _stream->Read(buf, size, &bytesRead );
     if ( (int)bytesRead!=size ) {
@@ -1087,7 +1089,7 @@ bool CacheFile::read( lUInt16 type, lUInt16 dataIndex, lUInt8 * &buf, int &size 
 
         // uncompress block data
         lUInt8 * uncomp_buf = NULL;
-        lUInt32 uncomp_size = 0;
+        lUInt32 uncomp_size = block->_uncompressedSize;
         if ( ldomUnpack(buf, size, uncomp_buf, uncomp_size) && uncomp_size==block->_uncompressedSize ) {
             free( buf );
             buf = uncomp_buf;
@@ -1541,6 +1543,21 @@ bool CacheFile::ldomUnpack( const lUInt8 * compbuf, size_t compsize, lUInt8 * &d
 /// pack data from buf to dstbuf
 bool CacheFile::ldomPack( const lUInt8 * buf, size_t bufsize, lUInt8 * &dstbuf, lUInt32 & dstsize )
 {
+#if CR_MCU
+    // 中文：缓存压缩使用有界堆缓冲，不能占用桌面的 64 KiB 工作栈。
+    // English: Compress cache blocks into bounded heap storage, without the desktop 64 KiB stack workspace.
+    dstbuf = NULL;
+    dstsize = 0;
+    if (bufsize > UINT_MAX) return false;
+    uLongf capacity = compressBound(static_cast<uLong>(bufsize));
+    lUInt8 *packed = static_cast<lUInt8 *>(malloc(capacity));
+    if (!packed) return false;
+    int result = compress2(packed, &capacity, buf, static_cast<uLong>(bufsize), DOC_DATA_COMPRESSION_LEVEL);
+    if (result != Z_OK || capacity > UINT_MAX) { free(packed); return false; }
+    dstbuf = packed;
+    dstsize = static_cast<lUInt32>(capacity);
+    return true;
+#else
     lUInt8 tmp[PACK_BUF_SIZE]; // 64K buffer for compressed data
     int ret;
     z_stream z;
@@ -1578,11 +1595,26 @@ bool CacheFile::ldomPack( const lUInt8 * buf, size_t bufsize, lUInt8 * &dstbuf, 
     dstbuf = compressed_buf;
     // printf("deflate() done: %d > %d\n", bufsize, compressed_size);
     return true;
+#endif
 }
 
 /// unpack data from compbuf to dstbuf
 bool CacheFile::ldomUnpack( const lUInt8 * compbuf, size_t compsize, lUInt8 * &dstbuf, lUInt32 & dstsize  )
 {
+#if CR_MCU
+    // 中文：索引已记录输出长度，直接解入目标堆块，避免 256 KiB 栈数组和重复扩容。
+    // English: The index records output length; decode directly into the destination heap block, avoiding a 256 KiB stack array and repeated growth.
+    dstbuf = NULL;
+    if (!dstsize || dstsize > INT_MAX || compsize > UINT_MAX) return false;
+    lUInt8 *unpacked = static_cast<lUInt8 *>(malloc(dstsize));
+    if (!unpacked) return false;
+    uLongf actual = dstsize;
+    uLong consumed = static_cast<uLong>(compsize);
+    int result = uncompress2(unpacked, &actual, compbuf, &consumed);
+    if (result != Z_OK || actual != dstsize || consumed != compsize) { free(unpacked); return false; }
+    dstbuf = unpacked;
+    return true;
+#else
     lUInt8 tmp[UNPACK_BUF_SIZE]; // 256K buffer for uncompressed data
     int ret;
     z_stream z = { 0 };
@@ -1621,6 +1653,7 @@ bool CacheFile::ldomUnpack( const lUInt8 * compbuf, size_t compsize, lUInt8 * &d
     dstbuf = uncompressed_buf;
     // printf("inflate() done %d > %d\n", compsize, uncompressed_size);
     return true;
+#endif
 }
 #endif
 
@@ -2770,6 +2803,7 @@ bool tinyNodeCollection::loadNodeData(lUInt16 type, ldomNode ** list, int nodeco
         int buflen;
         if (!_cacheFile->read( type, i, p, buflen ))
             return false;
+        std::unique_ptr<lUInt8, decltype(&free)> pending(p, free);
         if (!p || (unsigned)buflen != sizeof(ldomNode) * sz)
             return false;
         ldomNode * buf = (ldomNode *)p;
@@ -2784,6 +2818,7 @@ bool tinyNodeCollection::loadNodeData(lUInt16 type, ldomNode ** list, int nodeco
                 return false;
             memset( list[i] + sz, 0, (TNC_PART_LEN - sz) * sizeof(ldomNode) );
         }
+        pending.release();
         for (int j=0; j<sz; j++) {
             list[i][j].setDocumentIndex( _docIndex );
             // validate loaded nodes: all non-null nodes should be marked as persistent, i.e. the actual node data: _data._pelem_addr, _data._ptext_addr,
@@ -2817,8 +2852,16 @@ bool tinyNodeCollection::saveNodeData( lUInt16 type, ldomNode ** list, int nodec
         if (offs + sz > nodecount) {
             sz = nodecount - offs;
         }
+#if CR_MCU
+        // 中文：节点块随内容增长，不能使用可变长度工作栈。
+        // English: Node blocks grow with content and must not use a variable-length stack workspace.
+        std::unique_ptr<ldomNode[]> storage(new ldomNode[sz]);
+        ldomNode *buf = storage.get();
+#else
         ldomNode buf[sz];
-        memcpy(buf, list[i], sizeof(buf));
+#endif
+        const size_t bytes = sizeof(ldomNode) * sz;
+        memcpy(buf, list[i], bytes);
         for (int j = 0; j < sz; j++) {
             buf[j].setDocumentIndex(0);
             // On 64bits builds, this serialized ldomNode may have some
@@ -2832,7 +2875,7 @@ bool tinyNodeCollection::saveNodeData( lUInt16 type, ldomNode ** list, int nodec
             buf[j]._data._nextFreeIndex = tmp;         // restore 32bits part
 #endif
         }
-        if (!_cacheFile->write(type, i, (lUInt8*)buf, sizeof(buf), COMPRESS_NODE_DATA))
+        if (!_cacheFile->write(type, i, (lUInt8*)buf, bytes, COMPRESS_NODE_DATA))
             crFatalError(-1, "Cannot write node data");
     }
     return true;
@@ -2864,36 +2907,28 @@ bool tinyNodeCollection::loadNodeData()
     if ( magic != NODE_INDEX_MAGIC ) {
         return false;
     }
-    if ( elemcount<=0 )
+    if (elemcount <= 0 || elemcount >= TNC_PART_COUNT * TNC_PART_LEN)
         return false;
-    if ( textcount<=0 )
+    if (textcount <= 0 || textcount >= TNC_PART_COUNT * TNC_PART_LEN)
         return false;
-    ldomNode * elemList[TNC_PART_COUNT] = { 0 };
-    ldomNode * textList[TNC_PART_COUNT] = { 0 };
-    if ( !loadNodeData( CBT_ELEM_NODE, elemList, elemcount+1 ) ) {
-        for ( int i=0; i<TNC_PART_COUNT; i++ )
-            if ( elemList[i] )
-                free( elemList[i] );
+    // 中文：缓存恢复目录使用堆，并在解析失败或异常时归还所有已读节点块。
+    // English: Heap-backed restore directories release all loaded node blocks on failure or exception.
+    auto cleanup = [](ldomNode **list) {
+        for (int i = 0; i < TNC_PART_COUNT; ++i) free(list[i]);
+        delete[] list;
+    };
+    std::unique_ptr<ldomNode *[], decltype(cleanup)> elements(new ldomNode *[TNC_PART_COUNT](), cleanup);
+    std::unique_ptr<ldomNode *[], decltype(cleanup)> texts(new ldomNode *[TNC_PART_COUNT](), cleanup);
+    if (!loadNodeData(CBT_ELEM_NODE, elements.get(), elemcount + 1) ||
+        !loadNodeData(CBT_TEXT_NODE, texts.get(), textcount + 1))
         return false;
+    for (int i = 0; i < TNC_PART_COUNT; ++i) {
+        free(_elemList[i]);
+        free(_textList[i]);
+        _elemList[i] = elements[i];
+        _textList[i] = texts[i];
+        elements[i] = texts[i] = NULL;
     }
-    if ( !loadNodeData( CBT_TEXT_NODE, textList, textcount+1 ) ) {
-        for ( int i=0; i<TNC_PART_COUNT; i++ )
-            if ( textList[i] )
-                free( textList[i] );
-        // Also clean elemList previously successfully loaded, to avoid mem leak
-        for ( int i=0; i<TNC_PART_COUNT; i++ )
-            if ( elemList[i] )
-                free( elemList[i] );
-        return false;
-    }
-    for ( int i=0; i<TNC_PART_COUNT; i++ ) {
-        if ( _elemList[i] )
-            free( _elemList[i] );
-        if ( _textList[i] )
-            free( _textList[i] );
-    }
-    memcpy( _elemList, elemList, sizeof(elemList) );
-    memcpy( _textList, textList, sizeof(textList) );
     _elemCount = elemcount;
     _textCount = textcount;
     return true;

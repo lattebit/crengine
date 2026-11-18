@@ -768,7 +768,14 @@ bool TexHyph::load( LVStreamRef stream )
         if ( stream->SetPos(p)!=p )
             return false;
         lChar32 charMap[256] = { 0 };
+#if CR_MCU
+        // 中文：旧字典块按需放在堆上，不占用 64 KiB 工作栈。
+        // English: Allocate legacy dictionary blocks on demand instead of consuming 64 KiB of stack.
+        std::unique_ptr<unsigned char[]> storage(new unsigned char[0x10000]);
+        unsigned char *buf = storage.get();
+#else
         unsigned char buf[0x10000];
+#endif
         // make char map table
         for (i=0; i<hyph_count; i++)
         {

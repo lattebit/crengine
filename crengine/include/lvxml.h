@@ -21,6 +21,9 @@
 #include "lvtypes.h"
 #include "lvstring.h"
 #include "lvstream.h"
+#if CR_MCU
+#include <memory>
+#endif
 #include "crtxtenc.h"
 #include "dtddef.h"
 
@@ -190,7 +193,14 @@ protected:
     lString32 m_encoding_name;
     lChar32 * m_conv_table; // charset conversion table for 8-bit encodings
 
+#if CR_MCU
+    // 中文：解析器可能在调用栈上创建，字符工作区必须放在堆上并自动回收。
+    // English: Parsers may be stack objects; keep their character workspace on the heap with automatic cleanup.
+    std::unique_ptr<lChar32[]> m_read_storage{new lChar32[XML_CHAR_BUFFER_SIZE]};
+    lChar32 *m_read_buffer = m_read_storage.get();
+#else
     lChar32 m_read_buffer[XML_CHAR_BUFFER_SIZE];
+#endif
     int m_read_buffer_len;
     int m_read_buffer_pos;
     bool m_eof;
