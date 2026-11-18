@@ -34,6 +34,19 @@ int main(int argc, char **argv) {
     assert(cre_mcu_initialize(&cfg) == CRE_OK);
     cre_layout layout{480, 640, 24, 400, 12, 100, 2, 0, 0, {}, 12};
     std::strcpy(layout.font, argv[1]); std::vector<uint8_t> image(480 * 640 / 2);
+    {
+        std::vector<uint8_t> reference;
+        for (const char *encoding : {"utf-8", "gbk", "utf-16", "utf-32"}) {
+            cre_document *document = nullptr;
+            auto path = std::string(argv[2]) + "/short-" + encoding + ".txt";
+            assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
+            cre_anchor anchor{}; cre_page_state state{}; char text[128]{};
+            assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
+            assert(cre_document_text(document, text, sizeof(text)) == CRE_OK && std::strstr(text, "中文"));
+            if (reference.empty()) reference = image; else assert(reference == image);
+            cre_document_close(document); assert(!platform.files);
+        }
+    }
     const char *languages[] = {"ja", "", "ja", "ja", "en", "ja", "", "ja", "en-US", "en-GB"};
     for (unsigned i = 0; i < sizeof(languages) / sizeof(*languages); ++i) {
         cre_document *document = nullptr;

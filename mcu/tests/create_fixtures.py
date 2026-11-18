@@ -25,6 +25,8 @@ stress += ''.join(f'<aside class="note" id="n{i}"><p>Footnote {i}. {paragraph * 
     '.overlap { margin-top: -2em; } .flow { -cr-hint: non-linear; } .note { -cr-hint: footnote-inpage; font-size: 80%; }'
     '</style></head><body>' + stress + '</body></html>')
 (out / "fixture.txt").write_text("Layout fixture\n\n" + "\n\n".join(paragraph * 3 for _ in range(32)))
+for encoding in ("utf-8", "gbk", "utf-16", "utf-32"):
+    (out / f"short-{encoding}.txt").write_bytes("中文\n".encode(encoding))
 (out / "fixture.fb2").write_text('<?xml version="1.0" encoding="UTF-8"?><FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><description><title-info><book-title>Fixture</book-title><lang>zh</lang></title-info></description><body><section><title><p>Layout fixture</p></title>' + ''.join('<p>' + paragraph * 3 + '</p>' for _ in range(32)) + '</section></body></FictionBook>')
 (out / "fixture.rtf").write_text(r'{\rtf1\ansi\deff0 {\fonttbl {\f0 Times New Roman;}}\f0\fs24 ' + (r'Anchor target. Reading formatted text. \b Bold\b0  and \i italic\i0 .\par ' * 80) + '}')
 (out / "fixture.md").write_text('# Layout fixture\n\n' + (paragraph * 3 + '\n\n') * 24 + '## Lists and tables\n\n- First **bold**\n- Second *emphasis*\n\n1. Ordered\n2. List\n\n| Left | Right |\n| :--- | ---: |\n| A | B |\n\n[Link](#note) and `inline code` &amp; entity.\n\n```text\n  code\n    indentation\n```\n\n<b>Raw HTML</b>\n\n<div>HTML block</div>\n')

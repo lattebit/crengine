@@ -409,6 +409,32 @@ int LVTextFileBase::ReadChars( lChar32 * buf, int maxsize )
             }
             return count;
         } else  {
+#if CR_MCU
+            // 中文：逐个验证 UTF-8 标量，跨读取边界等待补齐；坏字节以替代符显示。
+            // English: Validate UTF-8 scalars, await incomplete read boundaries, and display replacement characters for invalid bytes.
+            while (count < maxsize && m_buf_pos < m_buf_len) {
+                unsigned char first = m_buf[m_buf_pos];
+                int bytes = first < 0x80 ? 1 : first >= 0xc2 && first <= 0xdf ? 2 :
+                            first >= 0xe0 && first <= 0xef ? 3 : first >= 0xf0 && first <= 0xf4 ? 4 : 0;
+                lChar32 value = bytes == 1 ? first : bytes ? first & ((1 << (7 - bytes)) - 1) : 0xfffd;
+                bool valid = bytes != 0;
+                int available = m_buf_len - m_buf_pos;
+                for (int i = 1; valid && i < bytes && i < available; ++i) {
+                    unsigned char next = m_buf[m_buf_pos + i];
+                    valid = (next & 0xc0) == 0x80;
+                    if (i == 1) valid = valid && !(first == 0xe0 && next < 0xa0) &&
+                        !(first == 0xed && next >= 0xa0) && !(first == 0xf0 && next < 0x90) && !(first == 0xf4 && next >= 0x90);
+                    value = (value << 6) | (next & 0x3f);
+                }
+                if (valid && available < bytes) {
+                    if (m_buf_fpos + m_buf_len < m_stream_size) return count;
+                    valid = false;
+                }
+                buf[count++] = valid ? value : 0xfffd;
+                m_buf_pos += valid ? bytes : 1;
+            }
+            return count;
+#else
             int srclen = m_buf_len - m_buf_pos;
             int dstlen = maxsize;
             Utf8ToUnicode(m_buf + m_buf_pos, srclen, buf, dstlen);
@@ -446,6 +472,7 @@ int LVTextFileBase::ReadChars( lChar32 * buf, int maxsize )
                 }
             }
             return dstlen;
+#endif
         }
     case ce_utf16_be:
 #if CR_MCU
@@ -1216,8 +1243,10 @@ public:
     //lvsize_t fsize;  // size of data in file
     lUInt32 flags;  // flags. 1=eoln
     lString32 text; // line text
-    lUInt16 lpos;   // left non-space char position
-    lUInt16 rpos;   // right non-space char posision + 1
+    // 中文：长行的位置不能在 65536 字符处回绕，否则整行会被判为空行。
+    // English: Long-line positions must not wrap at 65536 characters and turn the entire line into an empty line.
+    int lpos;
+    int rpos;
     lineAlign_t align;
     bool empty() { return rpos==0; }
     bool isHeading() { return (flags & LINE_IS_HEADER)!=0; }
@@ -1235,9 +1264,9 @@ public:
                     if ( *s != ' ' ) {
                         if ( rpos==0 && p>0 ) {
                             //CRLog::debug("   lpos = %d", p);
-                            lpos = (lUInt16)p;
+                            lpos = p;
                         }
-                        rpos = (lUInt16)(p + 1);
+                        rpos = p + 1;
                     }
                     p++;
                 }
@@ -2711,8 +2740,60 @@ LVTextParser::~LVTextParser()
 
 
 /// returns true if format is recognized by parser
+#if CR_MCU
+// 中文：TXT 用固定工作区检查整个源；少量中文不能被 ASCII 前缀或最短探测长度掩盖。
+// English: Check a TXT source with fixed workspace so sparse Chinese is not hidden by an ASCII prefix or a detection minimum.
+static const char *mcuTextEncoding(LVStreamRef stream) {
+    unsigned char buffer[1024];
+    bool utf8 = true, gbk = true, gbkLead = false;
+    unsigned remaining = 0, low = 0x80, high = 0xbf;
+    stream->SetPos(0);
+    for (lvsize_t offset = 0; offset < stream->GetSize();) {
+        cre_mcu_checkpoint();
+        lvsize_t count = 0;
+        if (stream->Read(buffer, sizeof(buffer), &count) != LVERR_OK || !count) throw CreMcuFailure{CRE_IO};
+        if (!offset) {
+            // 中文：补零只用于极短 BOM 检查，不参与内容验证。
+            // English: Padding is only for very short BOM detection, never content validation.
+            unsigned char bom[4] = {};
+            memcpy(bom, buffer, count < 4 ? count : 4);
+            if (const char *encoding = SniffBOM(bom, 4)) { stream->SetPos(0); return encoding; }
+        }
+        for (lvsize_t i = 0; i < count; ++i) {
+            unsigned ch = buffer[i];
+            if (utf8) {
+                if (remaining) {
+                    if (ch < low || ch > high) utf8 = false;
+                    --remaining; low = 0x80; high = 0xbf;
+                } else if (ch >= 0x80) {
+                    if (ch >= 0xc2 && ch <= 0xdf) remaining = 1;
+                    else if (ch >= 0xe0 && ch <= 0xef) {
+                        remaining = 2; low = ch == 0xe0 ? 0xa0 : 0x80; high = ch == 0xed ? 0x9f : 0xbf;
+                    } else if (ch >= 0xf0 && ch <= 0xf4) {
+                        remaining = 3; low = ch == 0xf0 ? 0x90 : 0x80; high = ch == 0xf4 ? 0x8f : 0xbf;
+                    } else utf8 = false;
+                }
+            }
+            if (gbk) {
+                if (gbkLead) { gbk = ch >= 0x40 && ch <= 0xfe && ch != 0x7f; gbkLead = false; }
+                else if (ch >= 0x80) { gbkLead = ch >= 0x81 && ch <= 0xfe; gbk = gbkLead; }
+            }
+        }
+        offset += count;
+    }
+    stream->SetPos(0);
+    return utf8 && !remaining ? "utf-8" : gbk && !gbkLead ? "gbk" : "utf-8";
+}
+#endif
+
 bool LVTextParser::CheckFormat()
 {
+#if CR_MCU
+    Reset();
+    SetCharset(Utf8ToUnicode(mcuTextEncoding(m_stream)).c_str());
+    Reset();
+    return true;
+#else
     Reset();
     // encoding test
     if ( !AutodetectEncoding() )
@@ -2760,6 +2841,7 @@ bool LVTextParser::CheckFormat()
     storage.reset();
     Reset();
     return res;
+#endif
 }
 
 /// parses input stream
@@ -2812,8 +2894,12 @@ LVTextRobustParser::~LVTextRobustParser()
 /// returns true if format is recognized by parser
 bool LVTextRobustParser::CheckFormat()
 {
+#if CR_MCU
+    return LVTextParser::CheckFormat();
+#else
     SetCharset( lString32( "utf-8" ).c_str() );
     return true;
+#endif
 }
 
 /*******************************************************************************/
