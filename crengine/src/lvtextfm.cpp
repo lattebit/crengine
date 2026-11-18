@@ -12,6 +12,9 @@
 *******************************************************/
 
 #include "crsetup.h"
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -5940,6 +5943,9 @@ lUInt32 LFormattedText::Format(lUInt16 width, lUInt16 page_height, int para_dire
                 int usable_left_overflow, int usable_right_overflow, bool hanging_punctuation,
                 BlockFloatFootprint * float_footprint)
 {
+#ifdef CR_MCU
+    cre_mcu_checkpoint();
+#endif
     // clear existing formatted data, if any
     freeFrmLines( m_pbuffer );
     // setup new page size

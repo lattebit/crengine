@@ -1,0 +1,11 @@
+/*
+ * 中文：构建时嵌入上游用户代理样式，避免运行期文件依赖。
+ * English: Embed upstream user-agent styles at build time without runtime file dependencies.
+ */
+#pragma once
+namespace cre_styles {
+static const char html[] = R"CRMCUCSS(@CRE_HTML_CSS@
+@CRE_EPUB_CSS@)CRMCUCSS";
+static const char fictionbook[] = R"CRMCUCSS(@CRE_FB2_CSS@)CRMCUCSS";
+static const char text[] = R"CRMCUCSS(@CRE_TXT_CSS@)CRMCUCSS";
+}

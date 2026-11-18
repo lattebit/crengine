@@ -1,0 +1,27 @@
+[submodule "mcu/deps/freetype"]
+	path = mcu/deps/freetype
+	url = https://github.com/freetype/freetype.git
+[submodule "mcu/deps/harfbuzz"]
+	path = mcu/deps/harfbuzz
+	url = https://github.com/harfbuzz/harfbuzz.git
+[submodule "mcu/deps/fribidi"]
+	path = mcu/deps/fribidi
+	url = https://github.com/fribidi/fribidi.git
+[submodule "mcu/deps/libunibreak"]
+	path = mcu/deps/libunibreak
+	url = https://github.com/adah1972/libunibreak.git
+[submodule "mcu/deps/utf8proc"]
+	path = mcu/deps/utf8proc
+	url = https://github.com/JuliaStrings/utf8proc.git
+[submodule "mcu/deps/zlib"]
+	path = mcu/deps/zlib
+	url = https://github.com/madler/zlib.git
+[submodule "mcu/deps/xxhash"]
+	path = mcu/deps/xxhash
+	url = https://github.com/Cyan4973/xxHash.git
+[submodule "mcu/deps/md4c"]
+	path = mcu/deps/md4c
+	url = https://github.com/mity/md4c.git
+[submodule "mcu/deps/nanosvg"]
+	path = mcu/deps/nanosvg
+	url = https://github.com/memononen/nanosvg.git

@@ -12,6 +12,9 @@
 *******************************************************/
 
 #include "crsetup.h"
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 #include "../include/rtfimp.h"
 #include "../include/crtxtenc.h"
@@ -397,6 +400,7 @@ LVRtfDestination::LVRtfDestination( LVRtfParser & parser )
 /// descructor
 LVRtfParser::~LVRtfParser()
 {
+    delete[] txtbuf;
 }
 
 /// returns true if format is recognized by parser
@@ -431,7 +435,11 @@ void LVRtfParser::CommitText()
     txtpos = 0;
 }
 
+#ifdef CR_MCU
+#define MAX_TXT_SIZE 1023
+#else
 #define MAX_TXT_SIZE 65535
+#endif
 
 void LVRtfParser::AddChar8( lUInt8 ch )
 {
@@ -443,7 +451,11 @@ void LVRtfParser::AddChar8( lUInt8 ch )
 // m_buf_pos points to first byte of char
 void LVRtfParser::AddChar( lChar32 ch )
 {
-    if ( txtpos >= MAX_TXT_SIZE || ch==13 ) {
+    // 中文：缓冲满时只提交文本，不制造新的段落边界。
+    // English: Flush a full text buffer without introducing a paragraph boundary.
+    if (txtpos >= MAX_TXT_SIZE)
+        CommitText();
+    if (ch==13) {
         CommitText();
         m_stack.getDestination()->OnAction(LVRtfDestination::RA_PARA);
     }
@@ -504,6 +516,9 @@ bool LVRtfParser::Parse()
     txtfstart = 0;
     char cwname[33];
     while ( !Eof() && !errorFlag && !m_stopped ) {
+#ifdef CR_MCU
+        cre_mcu_checkpoint();
+#endif
         // load next portion of data if necessary
         if ( m_buf_len - m_buf_pos < MIN_BUF_DATA_SIZE ) {
             if ( !FillBuffer( MIN_BUF_DATA_SIZE*2 ) ) {
@@ -623,15 +638,14 @@ bool LVRtfParser::Parse()
             m_buf_pos += (int)(p - (m_buf + m_buf_pos));
         }
     }
-    m_callback->OnStop();
-    delete[] txtbuf;
-    txtbuf = NULL;
-
     CommitText();
     m_stack.getDestination()->OnAction(LVRtfDestination::RA_SECTION);
 
       m_callback->OnTagClose( NULL, U"body" );
     m_callback->OnTagClose( NULL, U"FictionBook" );
+    m_callback->OnStop();
+    delete[] txtbuf;
+    txtbuf = NULL;
 
     return !errorFlag;
 }

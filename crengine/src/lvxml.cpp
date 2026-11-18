@@ -12,6 +12,9 @@
 *******************************************************/
 
 #include "crsetup.h"
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 #include "../include/lvxml.h"
 #include "../include/crtxtenc.h"
@@ -2999,8 +3002,14 @@ bool LVXMLParser::Parse()
     lString32 attrvalue;
     bool errorFlag = false;
     int flags = m_callback->getFlags();
+#ifdef CR_MCU
+    unsigned checkpointCount = 0;
+#endif
     for (;!m_eof && !errorFlag;)
     {
+#ifdef CR_MCU
+        if ((++checkpointCount & 255) == 0) cre_mcu_checkpoint();
+#endif
         if ( m_stopped )
              break;
         // load next portion of data if necessary

@@ -1,0 +1,48 @@
+#ifndef CRSETUP_H_INCLUDED
+#define CRSETUP_H_INCLUDED
+// 中文：MCU 只编译重排服务，不发现系统字体，不使用 mmap 或信号处理。
+// English: MCU builds only reflow services, without system font discovery, mmap or signal handlers.
+#define CR_MCU 1
+#define USE_ZLIB 1
+#define USE_ZSTD 0
+#define DOCUMENT_CACHING_MIN_SIZE 0x10000
+#define DOCUMENT_CACHING_SIZE_THRESHOLD 0x80000
+#define CHM_SUPPORT_ENABLED 0
+#define ENABLE_ANTIWORD 0
+#define USE_MD4C 1
+#define ARBITRARY_IMAGE_SCALE_ENABLED 1
+#define MAX_IMAGE_SCALE_MUL 2
+#define USE_GIF 0
+#define USE_LIBJPEG 0
+#define USE_LIBPNG 0
+#define USE_LIBWEBP 0
+#define USE_LUNASVG 0
+#define USE_NANOSVG 1
+#define USE_STB_IMAGE 0
+#define MATHML_SUPPORT 0
+#define USE_SRELL_REGEX 0
+#define COLOR_BACKBUFFER 0
+#define CR_INTERNAL_PAGE_ORIENTATION 0
+#define GRAY_BACKBUFFER_BITS 4
+#define GRAY_INVERSE 0
+#define DISABLE_CLOEXEC 1
+#define LVLONG_FILE_SUPPORT 0
+#define USE_ANSI_FILES 1
+#define FILE_STREAM_BUFFER_SIZE 0x1000
+#define ZIP_STREAM_BUFFER_SIZE 0x2000
+#define CR_USE_THREADS 0
+#define LDOM_USE_OWN_MEM_MAN 0
+#define USE_LIMITED_FONT_SIZES_SET 0
+#define USE_BITMAP_FONTS 0
+#define USE_WIN32_FONTS 0
+#define USE_GLYPHCACHE_HASHTABLE 0
+#define GLYPH_CACHE_SIZE 0x40000
+#define ALLOW_KERNING 1
+#define USE_FONTCONFIG 0
+#define USE_FREETYPE 1
+#define USE_FRIBIDI 1
+#define USE_HARFBUZZ 1
+#define USE_LIBUNIBREAK 1
+#define USE_UTF8PROC 1
+#define CR_ENABLE_PAGE_IMAGE_CACHE 0
+#endif

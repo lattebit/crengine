@@ -96,6 +96,9 @@
 // for resolving 'filepos' links (which may split a text node).
 
 #include "crsetup.h"
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 extern const int gDOMVersionCurrent = DOM_VERSION_CURRENT;
 
@@ -226,6 +229,7 @@ enum CacheFileBlockType {
 
 
 #include <stdlib.h>
+#include <memory>
 #include <string.h>
 #include "../include/lvstring.h"
 #include "../include/lvtinydom.h"
@@ -16512,8 +16516,8 @@ ldomDocument * LVParseXMLStream( LVStreamRef stream,
     if ( stream.isNull() )
         return NULL;
     bool error = true;
-    ldomDocument * doc;
-    doc = new ldomDocument();
+    auto owned = std::make_unique<ldomDocument>();
+    ldomDocument *doc = owned.get();
     doc->setDocFlags( 0 );
 
     ldomDocumentWriter writer(doc);
@@ -16522,18 +16526,13 @@ ldomDocument * LVParseXMLStream( LVStreamRef stream,
     doc->setNameSpaceTypes( ns_table );
 
     /// FB2 format
-    LVFileFormatParser * parser = new LVXMLParser(stream, &writer);
+    auto parser = std::make_unique<LVXMLParser>(stream, &writer);
     if ( parser->CheckFormat() ) {
         if ( parser->Parse() ) {
             error = false;
         }
     }
-    delete parser;
-    if ( error ) {
-        delete doc;
-        doc = NULL;
-    }
-    return doc;
+    return error ? nullptr : owned.release();
 }
 
 ldomDocument * LVParseHTMLStream( LVStreamRef stream,
@@ -16544,8 +16543,8 @@ ldomDocument * LVParseHTMLStream( LVStreamRef stream,
     if ( stream.isNull() )
         return NULL;
     bool error = true;
-    ldomDocument * doc;
-    doc = new ldomDocument();
+    auto owned = std::make_unique<ldomDocument>();
+    ldomDocument *doc = owned.get();
     doc->setDocFlags( 0 );
 
     ldomDocumentWriterFilter writerFilter(doc, false, HTML_AUTOCLOSE_TABLE);
@@ -16554,18 +16553,13 @@ ldomDocument * LVParseHTMLStream( LVStreamRef stream,
     doc->setNameSpaceTypes( ns_table );
 
     /// FB2 format
-    LVFileFormatParser * parser = new LVHTMLParser(stream, &writerFilter);
+    auto parser = std::make_unique<LVHTMLParser>(stream, &writerFilter);
     if ( parser->CheckFormat() ) {
         if ( parser->Parse() ) {
             error = false;
         }
     }
-    delete parser;
-    if ( error ) {
-        delete doc;
-        doc = NULL;
-    }
-    return doc;
+    return error ? nullptr : owned.release();
 }
 
 #if 0
@@ -21268,11 +21262,15 @@ bool ldomNode::initNodeFont(int docFragmentIdx)
             s = getDocument()->_styles.get( style );
         }
         LVFontRef fnt = ::getFont(this, s.get(), getDocument()->getFontContextDocIndex(), docFragmentIdx);
-        fntIndex = (lUInt16)getDocument()->_fonts.cache( fnt );
         if ( fnt.isNull() ) {
+#ifdef CR_MCU
+            throw CreMcuFailure{cre_mcu_error() == CRE_OK ? CRE_MEMORY : cre_mcu_error()};
+#else
             CRLog::error("font not found for style!");
             return false;
+#endif
         } else {
+            fntIndex = (lUInt16)getDocument()->_fonts.cache( fnt );
             getDocument()->_fontMap.set(style, fntIndex);
         }
         if ( font != 0 ) {

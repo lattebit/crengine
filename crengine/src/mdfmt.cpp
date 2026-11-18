@@ -27,106 +27,203 @@
 
 #include <string.h>
 
-#include <md4c-html.h>
+#include <md4c.h>
+#include <exception>
+#include <stdexcept>
 
-#define TEXT_PARSER_CHUNK_SIZE 16384
-
-bool DetectMarkdownFormat(LVStreamRef stream, const lString32& fileName) {
-    // Check file extension
-    lString32 nm = fileName;
-    nm = nm.lowercase();
-    if (!nm.endsWith(".md"))
-        return false;
-    // Check file size
-    lvsize_t sz = stream->GetSize();
-    if (sz < 5 || sz > MARKDOWN_MAX_FILE_SIZE)
-        return false;
-    // Checking for compliance with the text format
-    LVTextParser textParser(stream, NULL, true);
-    bool res = textParser.CheckFormat();
-    stream->SetPos(0);
-    return res;
+namespace {
+// 中文：直接将 MD4C 事件写入 DOM，仅保留源文本，避免完整 HTML 副本。
+// English: Write MD4C events directly into the DOM, retaining only source text without a full HTML copy.
+struct MarkdownWriter {
+    ldomDocumentWriter writer;
+    std::exception_ptr failure;
+    unsigned imageDepth = 0;
+    lString32 imageAlt;
+    explicit MarkdownWriter(ldomDocument *doc) : writer(doc) {}
+    void open(const lChar32 *tag) { writer.OnTagOpen(U"", tag); }
+    void body() { writer.OnTagBody(); }
+    void close(const lChar32 *tag) { writer.OnTagClose(U"", tag); }
+    void attr(const lChar32 *name, const MD_ATTRIBUTE &a) {
+        lString32 value = Utf8ToUnicode(lString8(a.text, a.size));
+        PreProcessXmlString(value, TXTFLG_PROCESS_ATTRIBUTE);
+        writer.OnAttribute(U"", name, value.c_str());
+    }
+    void empty(const lChar32 *tag) { open(tag); body(); close(tag); }
+};
+const lChar32 *blockTag(MD_BLOCKTYPE type, void *detail) {
+    switch (type) {
+    case MD_BLOCK_DOC: return U"body";
+    case MD_BLOCK_QUOTE: return U"blockquote";
+    case MD_BLOCK_UL: return U"ul";
+    case MD_BLOCK_OL: return U"ol";
+    case MD_BLOCK_LI: return U"li";
+    case MD_BLOCK_HR: return U"hr";
+    case MD_BLOCK_H: {
+        static const lChar32 *tags[] = {U"h1", U"h2", U"h3", U"h4", U"h5", U"h6"};
+        return tags[static_cast<MD_BLOCK_H_DETAIL *>(detail)->level - 1];
+    }
+    case MD_BLOCK_CODE: return U"pre";
+    case MD_BLOCK_P: return U"p";
+    case MD_BLOCK_TABLE: return U"table";
+    case MD_BLOCK_THEAD: return U"thead";
+    case MD_BLOCK_TBODY: return U"tbody";
+    case MD_BLOCK_TR: return U"tr";
+    case MD_BLOCK_TH: return U"th";
+    case MD_BLOCK_TD: return U"td";
+    default: return nullptr;
+    }
 }
-
-typedef struct cre_md4c_parse_data_tag
-{
-    lString8* htmlData;
-} cre_md4c_parse_data;
-
-static void my_md4c_process_output(const MD_CHAR* chunk, MD_SIZE sz, void* userData) {
-    cre_md4c_parse_data* data = (cre_md4c_parse_data*)userData;
-    data->htmlData->append(chunk, sz);
+const lChar32 *spanTag(MD_SPANTYPE type) {
+    switch (type) {
+    case MD_SPAN_EM: return U"em";
+    case MD_SPAN_STRONG: return U"strong";
+    case MD_SPAN_A: return U"a";
+    case MD_SPAN_IMG: return U"img";
+    case MD_SPAN_CODE: return U"code";
+    case MD_SPAN_DEL: return U"del";
+    case MD_SPAN_U: return U"u";
+    default: return U"span";
+    }
 }
-
-bool ImportMarkdownDocument(LVStreamRef stream, const lString32& fileName, ldomDocument* doc, LVDocViewCallback* progressCallback, CacheLoadingCallback* formatCallback) {
-    if (doc->openFromCache(formatCallback)) {
-        if (progressCallback) {
-            progressCallback->OnLoadFileEnd();
+template<class F> int guarded(void *ctx, F f) {
+    auto &w = *static_cast<MarkdownWriter *>(ctx);
+    if (w.failure) return 1;
+    try { f(w); return 0; }
+    catch (...) { w.failure = std::current_exception(); return 1; }
+}
+int enterBlock(MD_BLOCKTYPE type, void *detail, void *ctx) {
+    return guarded(ctx, [&](MarkdownWriter &w) {
+        const auto *tag = blockTag(type, detail);
+        if (!tag) return;
+        w.open(tag);
+        if (type == MD_BLOCK_OL) {
+            lString32 start = lString32::itoa(static_cast<MD_BLOCK_OL_DETAIL *>(detail)->start);
+            w.writer.OnAttribute(U"", U"start", start.c_str());
         }
+        if (type == MD_BLOCK_TH || type == MD_BLOCK_TD) {
+            static const lChar32 *align[] = {U"", U"left", U"center", U"right"};
+            auto value = static_cast<MD_BLOCK_TD_DETAIL *>(detail)->align;
+            if (value != MD_ALIGN_DEFAULT) w.writer.OnAttribute(U"", U"align", align[value]);
+        }
+        w.body();
+        if (type == MD_BLOCK_CODE) { w.open(U"code"); w.body(); }
+        if (type == MD_BLOCK_LI) {
+            auto *d = static_cast<MD_BLOCK_LI_DETAIL *>(detail);
+            if (d->is_task) {
+                const lChar32 *mark = d->task_mark == ' ' ? U"☐ " : U"☑ ";
+                w.writer.OnText(mark, 2, 0);
+            }
+        }
+    });
+}
+int leaveBlock(MD_BLOCKTYPE type, void *detail, void *ctx) {
+    return guarded(ctx, [&](MarkdownWriter &w) {
+        if (type == MD_BLOCK_CODE) w.close(U"code");
+        const auto *tag = blockTag(type, detail);
+        if (tag) w.close(tag);
+    });
+}
+int enterSpan(MD_SPANTYPE type, void *detail, void *ctx) {
+    return guarded(ctx, [&](MarkdownWriter &w) {
+        if (w.imageDepth) { if (type == MD_SPAN_IMG) ++w.imageDepth; return; }
+        w.open(spanTag(type));
+        if (type == MD_SPAN_A) {
+            auto *d = static_cast<MD_SPAN_A_DETAIL *>(detail);
+            w.attr(U"href", d->href); w.attr(U"title", d->title);
+        }
+        if (type == MD_SPAN_IMG) {
+            auto *d = static_cast<MD_SPAN_IMG_DETAIL *>(detail);
+            w.attr(U"src", d->src); w.attr(U"title", d->title);
+            w.imageDepth = 1; w.imageAlt.clear(); return;
+        }
+        w.body();
+    });
+}
+int leaveSpan(MD_SPANTYPE type, void *, void *ctx) {
+    return guarded(ctx, [&](MarkdownWriter &w) {
+        if (w.imageDepth) {
+            if (type != MD_SPAN_IMG || --w.imageDepth) return;
+            w.writer.OnAttribute(U"", U"alt", w.imageAlt.c_str()); w.body();
+        }
+        w.close(spanTag(type));
+    });
+}
+// 中文：原始 HTML 片段借用同一 writer，不开启或结束第二份文档。
+// English: Raw HTML fragments borrow the same writer without starting or ending another document.
+class HTMLFragment : public LVXMLParserCallback {
+    ldomDocumentWriter &w;
+public:
+    explicit HTMLFragment(ldomDocumentWriter &target) : w(target) {}
+    bool OnBlob(lString32 name, const lUInt8 *data, int size) override { return w.OnBlob(name, data, size); }
+    void OnStart(LVFileFormatParser *) override {}
+    void OnStop() override {}
+    lUInt32 getFlags() override { return w.getFlags(); }
+    void setFlags(lUInt32 flags) override { w.setFlags(flags); }
+    void OnEncoding(const lChar32 *, const lChar32 *) override {}
+    ldomNode *OnTagOpen(const lChar32 *ns, const lChar32 *tag) override { return w.OnTagOpen(ns, tag); }
+    void OnTagBody() override { w.OnTagBody(); }
+    void OnTagClose(const lChar32 *ns, const lChar32 *tag, bool self = false) override { w.OnTagClose(ns, tag, self); }
+    void OnAttribute(const lChar32 *ns, const lChar32 *name, const lChar32 *value) override { w.OnAttribute(ns, name, value); }
+    void OnText(const lChar32 *text, int size, lUInt32 flags) override { w.OnText(text, size, flags); }
+};
+int textEvent(MD_TEXTTYPE type, const MD_CHAR *text, MD_SIZE size, void *ctx) {
+    return guarded(ctx, [&](MarkdownWriter &w) {
+        if (type == MD_TEXT_HTML && !w.imageDepth) {
+            HTMLFragment fragment(w.writer);
+            LVStreamRef stream = LVCreateMemoryStream(const_cast<MD_CHAR *>(text), size, true);
+            LVHTMLParser parser(stream, &fragment);
+            parser.SetCharset(U"utf-8");
+            if (!parser.Parse()) throw std::runtime_error("Markdown HTML fragment");
+            return;
+        }
+        if (type == MD_TEXT_BR && !w.imageDepth) { w.empty(U"br"); return; }
+        lString32 value = type == MD_TEXT_NULLCHAR ? lString32(U"�") :
+                          type == MD_TEXT_SOFTBR || type == MD_TEXT_BR ? lString32(U"\n") :
+                          Utf8ToUnicode(lString8(text, size));
+        if (type == MD_TEXT_ENTITY) PreProcessXmlString(value, TXTFLG_PRE);
+        if (w.imageDepth) w.imageAlt += value;
+        else w.writer.OnText(value.c_str(), value.length(), type == MD_TEXT_CODE ? TXTFLG_PRE : 0);
+    });
+}
+}
+
+bool DetectMarkdownFormat(LVStreamRef stream, const lString32 &fileName) {
+    lString32 name(fileName); name.lowercase();
+    if (!name.endsWith(".md") && !name.endsWith(".markdown")) return false;
+    lvsize_t size = stream->GetSize();
+    return size > 0 && size <= MARKDOWN_MAX_FILE_SIZE;
+}
+
+bool ImportMarkdownDocument(LVStreamRef stream, const lString32 &fileName, ldomDocument *doc,
+                            LVDocViewCallback *progressCallback, CacheLoadingCallback *formatCallback) {
+    if (doc->openFromCache(formatCallback)) {
+        if (progressCallback) progressCallback->OnLoadFileEnd();
         return true;
     }
-    bool res = false;
-    // Read stream
-    lString8 rawData;
-    lString8 htmlData;
-    char buffer[TEXT_PARSER_CHUNK_SIZE];
-    lvsize_t bytesRead = 0;
+    lvsize_t length = stream->GetSize();
+    if (length > MARKDOWN_MAX_FILE_SIZE) return false;
+    lString8 source;
+    char chunk[1024];
     stream->SetPos(0);
-    while (stream->Read(buffer, TEXT_PARSER_CHUNK_SIZE, &bytesRead) == LVERR_OK) {
-        rawData.append(buffer, bytesRead);
-        if (bytesRead < TEXT_PARSER_CHUNK_SIZE)
-            break;
+    while (static_cast<lvsize_t>(source.length()) < length) {
+        lvsize_t bytes = 0;
+        if (stream->Read(chunk, sizeof(chunk), &bytes) != LVERR_OK || !bytes) return false;
+        source.append(chunk, bytes);
     }
-    // Parse and convert to html
-    cre_md4c_parse_data parseData;
-    parseData.htmlData = &htmlData;
-    int parse_res = md_html(rawData.c_str(), rawData.length(), my_md4c_process_output, (void*)&parseData,
-                            MD_FLAG_COLLAPSEWHITESPACE | MD_DIALECT_GITHUB,
-                            MD_HTML_FLAG_XHTML);
-    rawData.clear();
-    if (0 != parse_res) {
-        // Parse failed
-        CRLog::error("MD4C: Failed to parse Markdown document!");
-        return res;
-    }
-    // Write document content to stream to parse them
-    lvsize_t result_len = htmlData.length();
-    lString32 title = LVExtractFilenameWithoutExtension(fileName);
-    lString8 gen_preamble = cs8(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-            "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.1//EN\" \"http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd\">"
-            "<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>"
-    ) + UnicodeToUtf8(title) + cs8("</title></head><body>");
-    lString8 gen_tail = cs8("</body></html>");
-    lvsize_t dw;
-    LVStreamRef memStream = LVCreateMemoryStream();
-    res = !memStream.isNull();
-    if (res)
-        res = LVERR_OK == memStream->Write(gen_preamble.c_str(), gen_preamble.length(), &dw);
-    if (res)
-        res = dw == (lvsize_t)gen_preamble.length();
-    if (res) {
-        res = LVERR_OK == memStream->Write(htmlData.data(), result_len, &dw);
-    }
-    htmlData.clear();
-    if (res)
-        res = dw == result_len;
-    if (res)
-        res = LVERR_OK == memStream->Write(gen_tail.c_str(), gen_tail.length(), &dw);
-    if (res)
-        res = dw == (lvsize_t)gen_tail.length();
-    if (res) {
-        // Parse stream to document
-        ldomDocumentWriter writer(doc);
-        LVHTMLParser parser(memStream, &writer);
-        parser.setProgressCallback(progressCallback);
-        res = parser.CheckFormat() && parser.Parse();
-    }
-    if (res) {
-        doc->getProps()->setString(DOC_PROP_TITLE, title);
-        doc->buildTocFromHeadings();
-    }
-    return res;
+    MarkdownWriter w(doc);
+    w.writer.OnStart(nullptr);
+    w.open(U"html"); w.body();
+    MD_PARSER parser{};
+    parser.flags = MD_FLAG_COLLAPSEWHITESPACE | MD_DIALECT_GITHUB;
+    parser.enter_block = enterBlock; parser.leave_block = leaveBlock;
+    parser.enter_span = enterSpan; parser.leave_span = leaveSpan; parser.text = textEvent;
+    int result = md_parse(source.c_str(), source.length(), &parser, &w);
+    if (w.failure) std::rethrow_exception(w.failure);
+    if (result != 0) return false;
+    w.close(U"html"); w.writer.OnStop();
+    doc->getProps()->setString(DOC_PROP_TITLE, LVExtractFilenameWithoutExtension(fileName));
+    doc->buildTocFromHeadings();
+    if (progressCallback) progressCallback->OnLoadFileEnd();
+    return true;
 }
-
 #endif

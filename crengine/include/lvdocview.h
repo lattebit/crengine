@@ -24,6 +24,8 @@
 #include "lvdocviewcmd.h"
 #include "lvdocviewprops.h"
 
+struct EpubIndex;
+
 
 const lChar32 * getDocFormatName( doc_format_t fmt );
 
@@ -291,6 +293,8 @@ private:
     LVFontRef      m_batteryFont;
     LVContainerRef m_container;
     LVStreamRef    m_stream;
+    EpubIndex *m_epubIndex = nullptr;
+    int m_epubChapter = -1;
     LVContainerRef m_arc;
     ldomDocument * m_doc;
     lString8 m_stylesheet;
@@ -951,6 +955,9 @@ public:
     void Clear();
     /// load document from file
     bool LoadDocument( const char * fname, bool metadataOnly = false );
+    /// 中文：借用索引直至视图关闭；负章节保持完整导入，用于基准对照。
+    /// English: Borrow an index until the view closes; negative chapter retains full import for reference comparisons.
+    void setEpubIndex(EpubIndex *index, int chapter) { m_epubIndex = index; m_epubChapter = chapter; }
     /// load document from file
     bool LoadDocument( const lChar32 * fname, bool metadataOnly = false );
     /// load document from stream

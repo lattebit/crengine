@@ -5969,7 +5969,11 @@ void CRReinitTimer() {
 
 
 lUInt64 GetCurrentTimeMillis() {
-#if defined(LINUX) || defined(ANDROID) || defined(_LINUX)
+#ifdef CR_MCU
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec * (lUInt64)1000 + ts.tv_nsec / 1000000;
+#elif defined(LINUX) || defined(ANDROID) || defined(_LINUX)
     timeval ts;
     gettimeofday(&ts, NULL);
     return ts.tv_sec * (lUInt64)1000 + ts.tv_usec / 1000;

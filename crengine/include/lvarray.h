@@ -127,6 +127,10 @@ public:
     /// clears all items, but unlike clear() does not deallocate storage
     void reset()
     {
+        // 中文：容量仍可复用，元素引用必须立即归还，避免字体流跨会话存活。
+        // English: Retain capacity but release element references immediately, avoiding font streams surviving sessions.
+        for (int i = 0; i < _count; i++)
+            _array[i] = T();
         _count = 0;
     }
     /// copies range to beginning of array
@@ -164,6 +168,10 @@ public:
             _array[i-count] = _array[i];
         }
         _count -= count;
+        // 中文：移动尾部元素会留下重复引用，必须清空逻辑末尾以外的槽。
+        // English: Moving the tail leaves duplicate references; clear slots beyond the logical end.
+        for (i = _count; i < _count + count; i++)
+            _array[i] = T();
     }
     T remove( int pos )
     {

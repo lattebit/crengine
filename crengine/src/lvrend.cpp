@@ -12,6 +12,9 @@
 *******************************************************/
 
 #include "crsetup.h"
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 #include <stdlib.h>
 #include <string.h>
@@ -7734,6 +7737,9 @@ int BlockFloatFootprint::getTopShiftX(int final_width, bool get_right_shift)
 // Enhanced block rendering
 void renderBlockElementEnhanced( FlowState * flow, ldomNode * enode, int x, int container_width, lUInt32 flags )
 {
+#ifdef CR_MCU
+    cre_mcu_checkpoint();
+#endif
     if ( ! enode->isElement() ) {
         crFatalError(111, "Attempting to render Text node");
     }

@@ -24,6 +24,9 @@
  */
 
 #include "crsetup.h"
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 #include <math.h>
 #include <vector>
@@ -569,12 +572,16 @@ static void crFlushDottedDab(LVDrawBuf &drawbuf, const CRPerimeterWalk &pw, int 
 // LVFreeTypeFontManager's library (private to lvfntman.cpp) since stroking a
 // synthetic rectangle path has nothing to do with font/glyph loading.
 static FT_Library getBorderStrokeFTLibrary() {
+#ifdef CR_MCU
+    return cre_mcu_font_library();
+#else
     static FT_Library library = [] {
         FT_Library lib = NULL;
         FT_Init_FreeType(&lib);
         return lib;
     }();
     return library;
+#endif
 }
 
 // Point at local distance `local` within one segment (edge or arc).

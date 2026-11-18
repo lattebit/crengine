@@ -2,6 +2,7 @@
 
 #include "../include/epubfmt.h"
 #include "../include/fb2def.h"
+#include <memory>
 
 #if (USE_ZLIB==1)
 #include <zlib.h>
@@ -77,8 +78,9 @@ public:
 //    }
 //}
 
-bool DetectEpubFormat( LVStreamRef stream )
+bool DetectEpubFormat( LVStreamRef stream, LVContainerRef *archive )
 {
+    if (archive) archive->Clear();
     LVContainerRef m_arc = LVOpenArchieve( stream );
     if ( m_arc.isNull() )
         return false; // not a ZIP archive
@@ -107,6 +109,7 @@ bool DetectEpubFormat( LVStreamRef stream )
 
     if ( mimeType != U"application/epub+zip" )
         return false;
+    if (archive) *archive = m_arc;
     return true;
 }
 
@@ -1041,60 +1044,113 @@ LVStreamRef GetEpubCoverpage(LVContainerRef arc)
     return coverPageImageStream;
 }
 
+// 中文：目录只保存资源锚点，未加载章节的标题也能立即显示。
+// English: Contents retain resource anchors so titles in unloaded chapters are immediately available.
+static void AddEpubIndexToc(EpubIndex &index, const lString32 &base, lString32 title, lString32 href, int depth) {
+    if (href.empty() || index.toc.length() >= 65536) return;
+    EpubIndex::Toc entry;
+    entry.title = title.trim(); entry.href = LVCombinePaths(base, DecodeHTMLUrlString(href)); entry.depth = depth;
+    lString32 path = entry.href;
+    int hash = path.pos(U"#");
+    if (hash >= 0) path = path.substr(0, hash);
+    for (int i = 0; i < index.chapters.length(); ++i)
+        if (LVCombinePaths(index.codeBase, index.chapters[i].href) == path) { entry.chapter = i; break; }
+    if (entry.chapter >= 0) index.toc.add(entry);
+}
+static void ReadEpubNavNodes(EpubIndex &index, ldomNode *node, const lString32 &base, int depth, int nesting) {
+    if (!node || !node->isElement() || nesting > 64) return;
+    lString32 name = node->getNodeName();
+    if (name == U"a") AddEpubIndexToc(index, base, node->getText(), node->getAttributeValue("href"), depth);
+    if (name == U"ol" || name == U"ul") ++depth;
+    for (int i = 0; i < node->getChildCount(); ++i) ReadEpubNavNodes(index, node->getChildNode(i), base, depth, nesting + 1);
+}
+static ldomNode *FindEpubNav(ldomNode *node, bool exact, int nesting = 0) {
+    if (!node || !node->isElement() || nesting > 64) return nullptr;
+    if (node->getNodeName() == U"nav" && (!exact || node->getAttributeValue("type") == U"toc")) return node;
+    for (int i = 0; i < node->getChildCount(); ++i) {
+        auto *found = FindEpubNav(node->getChildNode(i), exact, nesting + 1);
+        if (found) return found;
+    }
+    return nullptr;
+}
+static void ReadEpubNcxNodes(EpubIndex &index, ldomNode *node, const lString32 &base, int depth, int nesting) {
+    if (!node || !node->isElement() || nesting > 64) return;
+    if (node->getNodeName() == U"navPoint") {
+        lString32 label, href;
+        for (int i = 0; i < node->getChildCount(); ++i) {
+            auto *child = node->getChildNode(i);
+            if (!child->isElement()) continue;
+            if (child->getNodeName() == U"navLabel") label = child->getText();
+            else if (child->getNodeName() == U"content") href = child->getAttributeValue("src");
+        }
+        AddEpubIndexToc(index, base, label, href, depth++);
+    }
+    for (int i = 0; i < node->getChildCount(); ++i) ReadEpubNcxNodes(index, node->getChildNode(i), base, depth, nesting + 1);
+}
+static void ReadEpubIndexToc(EpubIndex &index) {
+    if (index.epub3 && !index.navHref.empty()) {
+        lString32 path = LVCombinePaths(index.codeBase, index.navHref);
+        auto stream = index.archive->OpenStream(path.c_str(), LVOM_READ);
+        if (!stream.isNull()) {
+            std::unique_ptr<ldomDocument> doc(LVParseXMLStream(stream));
+            if (doc) {
+                auto *nav = FindEpubNav(doc->getRootNode(), true);
+                if (!nav) nav = FindEpubNav(doc->getRootNode(), false);
+                ReadEpubNavNodes(index, nav, LVExtractPath(path), 0, 0);
+            }
+        }
+    }
+    if (!index.toc.length() && !index.ncxHref.empty()) {
+        auto stream = index.archive->OpenStream(index.ncxHref.c_str(), LVOM_READ);
+        if (!stream.isNull()) {
+            std::unique_ptr<ldomDocument> doc(LVParseXMLStream(stream));
+            if (doc) ReadEpubNcxNodes(index, doc->getRootNode(), LVExtractPath(index.ncxHref), 1, 0);
+        }
+    }
+}
+
 bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCallback * progressCallback,
             CacheLoadingCallback * formatCallback, bool metadataOnly,
-            const elem_def_t * node_scheme, const attr_def_t * attr_scheme, const ns_def_t * ns_scheme )
+            const elem_def_t * node_scheme, const attr_def_t * attr_scheme, const ns_def_t * ns_scheme, EpubIndex *index, int chapter )
 {
-    LVContainerRef arc = LVOpenArchieve( stream );
-    if ( arc.isNull() )
-        return false; // not a ZIP archive
-
-    // check root media type
-    lString32 rootfilePath = EpubGetRootFilePath(arc);
-    if ( rootfilePath.empty() )
-        return false;
-
-    // Check for any encrypted/obfuscated resources
-    EncryptedDataContainer * decryptor = new EncryptedDataContainer(arc);
-    if (decryptor->open()) {
-        CRLog::debug("EPUB: encrypted items detected");
-    }
-
-    // Make our archive container a proxy to the real container,
-    // that can deobfuscate resources on-the-fly
-    LVContainerRef m_arc = LVContainerRef(decryptor);
-    if (decryptor->hasUnsupportedEncryptedItems()) {
-        printf("CRE WARNING: EPUB contains unsupported encrypted items (DRM)\n");
-        // Don't fail yet, it's possible only some fonts are obfuscated with
-        // an unsupported algorithm, and the HTML text is readable.
-    }
-    m_doc->setContainer(m_arc);
-
-    if ( progressCallback )
-        progressCallback->OnLoadFileProgress(1);
-
     EpubItems epubItems;
     LVArray<EpubItem*> spineItems;
-
-    lString32 codeBase = LVExtractPath(rootfilePath, false);
-    // CRLog::trace("codeBase=%s", LCSTR(codeBase));
-
-    LVStreamRef content_stream = m_arc->OpenStream(rootfilePath.c_str(), LVOM_READ);
-    if ( content_stream.isNull() )
-        return false;
-
-    bool isEpub3 = false;
-    lString32 epubVersion;
-    lString32 navHref; // epub3 TOC
-    lString32 ncxHref; // epub2 TOC
-    lString32 pageMapHref; // epub2 Adobe page-map
-    lString32 pageMapSource;
-    lString32 coverId;
+    LVContainerRef m_arc;
+    lString32 codeBase, navHref, ncxHref, pageMapHref, pageMapSource, coverId, epubVersion;
+    bool isEpub3 = false, unsupportedEncryption = false;
+    if (index && index->ready) {
+        m_arc = index->archive; codeBase = index->codeBase;
+        navHref = index->navHref; ncxHref = index->ncxHref;
+        pageMapHref = index->pageMapHref; pageMapSource = index->pageMapSource;
+        isEpub3 = index->epub3; unsupportedEncryption = index->unsupportedEncryption;
+        m_doc->getProps()->set(index->properties);
+        for (int i = 0; i < index->chapters.length(); ++i) {
+            const auto &chapter = index->chapters[i];
+            auto *item = new EpubItem;
+            item->href = chapter.href; item->mediaType = chapter.mediaType; item->id = chapter.id;
+            item->is_xhtml = chapter.xhtml; item->nonlinear = chapter.nonlinear;
+            epubItems.add(item); spineItems.add(item);
+        }
+    } else {
+        LVContainerRef arc = index && !index->archive.isNull() ? index->archive : LVOpenArchieve(stream);
+        if (arc.isNull()) return false;
+        lString32 rootfilePath = EpubGetRootFilePath(arc);
+        if (rootfilePath.empty()) return false;
+        auto *decryptor = new EncryptedDataContainer(arc);
+        m_arc = LVContainerRef(decryptor);
+        decryptor->open();
+        unsupportedEncryption = decryptor->hasUnsupportedEncryptedItems();
+        m_doc->setContainer(m_arc);
+        if (progressCallback) progressCallback->OnLoadFileProgress(1);
+        codeBase = LVExtractPath(rootfilePath, false);
+        LVStreamRef content_stream = m_arc->OpenStream(rootfilePath.c_str(), LVOM_READ);
+        if (content_stream.isNull()) return false;
 
     // Read OPF file
     {
         CRLog::debug("Parsing opf");
-        ldomDocument * doc = LVParseXMLStream( content_stream );
+        std::unique_ptr<ldomDocument> ownedDoc(LVParseXMLStream(content_stream));
+        ldomDocument *doc = ownedDoc.get();
         if ( !doc )
             return false;
 
@@ -1152,14 +1208,13 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
         // No need to do all the below work, except if we are only
         // requesting metadata (parsing some bits from the EPUB is still
         // less expensive than loading the full cache file).
-        if (!metadataOnly) {
+        if (!metadataOnly && !index) {
             CRLog::debug("Trying loading from cache");
             if ( m_doc->openFromCache(formatCallback, progressCallback) ) {
                 CRLog::debug("Loaded from cache");
                 if ( progressCallback ) {
                     progressCallback->OnLoadFileEnd( );
                 }
-                delete doc;
                 return true;
             }
             CRLog::debug("Not loaded from cache, parsing epub content");
@@ -1411,7 +1466,7 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
         // Iterate all package/manifest/item
         lUInt16 item_id = doc->getElementNameIndex(U"item");
         for (int i=0; i<nb_manifest_items; i++) {
-            if ( metadataOnly && !look_for_coverid && !look_for_epub3_cover && !look_for_coverxhtml_id) {
+            if ( metadataOnly && !index && !look_for_coverid && !look_for_epub3_cover && !look_for_coverxhtml_id) {
                 // No more stuff to find, stop iterating
                 break;
             }
@@ -1466,7 +1521,7 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
                     cover_xhtml_href = href;
                     look_for_coverxhtml_id = false;
                 }
-                if (metadataOnly) {
+                if (metadataOnly && !index) {
                     continue;
                 }
                 EpubItem * epubItem = new EpubItem;
@@ -1522,7 +1577,7 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
 
         // Gather EpubItems from <package><spine>, which specify which EpubItems,
         // and in which order, make out the book content
-        if ( !metadataOnly && epubItems.length()>0 ) {
+        if ( (!metadataOnly || index) && epubItems.length()>0 ) {
             CRLog::debug("opf: reading spine");
             if ( spine ) {
                 // Some attributes specify that some EpubItems have a specific purpose
@@ -1548,9 +1603,26 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
             }
             CRLog::debug("opf: reading spine done");
         }
-        delete doc;
         CRLog::debug("opf: closed");
     }
+        if (index) {
+            index->archive = m_arc; index->properties = m_doc->getProps()->clone();
+            index->codeBase = codeBase; index->navHref = navHref; index->ncxHref = ncxHref;
+            index->pageMapHref = pageMapHref; index->pageMapSource = pageMapSource;
+            index->epub3 = isEpub3; index->unsupportedEncryption = unsupportedEncryption;
+            index->chapters.clear(); index->toc.clear();
+            for (int i = 0; i < spineItems.length(); ++i) {
+                auto *item = spineItems[i];
+                EpubIndex::Chapter entry;
+                entry.href = item->href; entry.mediaType = item->mediaType; entry.id = item->id;
+                entry.xhtml = item->is_xhtml; entry.nonlinear = item->nonlinear;
+                index->chapters.add(entry);
+            }
+            ReadEpubIndexToc(*index);
+            index->ready = true;
+        }
+    }
+    m_doc->setContainer(m_arc);
 
     if ( metadataOnly ) {
         // We may have gathered some metadata, but the book may still not open if
@@ -1559,7 +1631,7 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
         return true;
     }
 
-    if ( spineItems.length()==0 )
+    if ( spineItems.length()==0 || chapter >= spineItems.length() )
         return false;
 
     if ( progressCallback )
@@ -1608,6 +1680,9 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
     }
     int lastProgressPercent = 5;
     for ( size_t i=0; i<spineItemsNb; i++ ) {
+        // 中文：索引保留全部路径替换，正文仅加载请求章节。
+        // English: Retain substitutions for every spine item while loading only the requested chapter.
+        if (chapter >= 0 && static_cast<int>(i) != chapter) continue;
         if ( progressCallback ) {
             int percent = 5 + 95 * i / spineItemsNb;
             if ( percent > lastProgressPercent ) {
@@ -1690,6 +1765,7 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
         }
     }
 
+    if (!index || chapter < 0) {
     // Clear any toc items possibly added while parsing the HTML
     m_doc->getToc()->clear();
     bool has_toc = false;
@@ -1864,6 +1940,7 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
             m_doc->getPageMap()->setSource(pageMapSource);
     }
 
+    }
     writer.OnTagClose(U"", U"body");
     writer.OnStop();
     CRLog::debug("EPUB: %d documents merged", fragmentCount);
@@ -1871,7 +1948,7 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
     // fragmentCount is not fool proof, best to check if we really made
     // some DocFragments children of <RootNode><body>
     if ( fragmentCount == 0 || m_doc->getRootNode()->getChildNode(0)->getChildCount() == 0 ) {
-        if (decryptor->hasUnsupportedEncryptedItems()) {
+        if (unsupportedEncryption) {
             // No non-encrypted text: show the unsupported DRM page
             createEncryptedEpubWarningDocument(m_doc);
             return true;

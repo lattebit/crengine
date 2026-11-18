@@ -25,8 +25,13 @@
 *******************************************************/
 
 #include "crsetup.h"
+#include <memory>
 
 #include "../include/lvstream.h"
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+#endif
+
 #include "../include/lvptrvec.h"
 #include "../include/crtxtenc.h"
 #include <stdio.h>
@@ -55,7 +60,9 @@ extern "C" {
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
+#ifndef CR_MCU
 #include <sys/mman.h>
+#endif
 #endif
 
 #ifndef USE_ANSI_FILES
@@ -1441,6 +1448,9 @@ bool LVSplitArcName( lString8 fullPathName, lString8 & arcPathName, lString8 & a
 // facility functions
 LVStreamRef LVOpenFileStream( const lChar32 * pathname, int mode )
 {
+#ifdef CR_MCU
+    return cre_mcu_open_stream(pathname, mode);
+#else
     lString32 fn(pathname);
     if (fn.length() > 1 && fn[0] == ASSET_PATH_PREFIX) {
     	if (!_assetContainerFactory || mode != LVOM_READ)
@@ -1466,6 +1476,7 @@ LVStreamRef LVOpenFileStream( const lChar32 * pathname, int mode )
         return LVStreamRef( stream );
     }
     return LVStreamRef();
+#endif
 }
 
 LVStreamRef LVOpenFileStream( const lChar8 * pathname, int mode )
@@ -2867,7 +2878,7 @@ public:
         // detect arc type
         if (hdr[0]!='P' || hdr[1]!='K' || hdr[2]!=3 || hdr[3]!=4)
                 return NULL;
-        LVZipArc * arc = new LVZipArc( stream );
+        std::unique_ptr<LVZipArc> arc(new LVZipArc(stream));
         int itemCount = arc->ReadContents();
         if ( itemCount > 0 && arc->usedAltReadingMethod() ) {
             printf("CRE WARNING: zip file truncated: going on with possibly partial content.\n");
@@ -2880,10 +2891,9 @@ public:
         if ( itemCount <= 0 )
         {
             printf("CRE WARNING: zip file corrupted or invalid: processing failure.\n");
-            delete arc;
             return NULL;
         }
-        return arc;
+        return arc.release();
     }
 
 };
@@ -3355,6 +3365,9 @@ LVContainerRef LVOpenDirectory(const lString8& path, const char32_t * mask) {
 
 LVContainerRef LVOpenDirectory( const char32_t * path, const char32_t * mask )
 {
+#ifdef CR_MCU
+    (void)mask; return cre_mcu_open_directory(path);
+#else
 	lString32 pathname(path);
     if (pathname.length() > 1 && pathname[0] == ASSET_PATH_PREFIX) {
     	if (!_assetContainerFactory)
@@ -3364,6 +3377,7 @@ LVContainerRef LVOpenDirectory( const char32_t * path, const char32_t * mask )
     }
     LVContainerRef dir(LVDirectoryContainer::OpenDirectory(path, mask));
     return dir;
+#endif
 }
 
 /// Stream base class
@@ -4002,7 +4016,7 @@ bool LVFileExists( const lString32 & pathName )
     	lString32 assetPath = LVExtractAssetPath(fn);
     	return !_assetContainerFactory->openAssetStream(assetPath).isNull();
     }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(CR_MCU)
 	LVStreamRef stream = LVOpenFileStream( pathName.c_str(), LVOM_READ );
 	return !stream.isNull();
 #else

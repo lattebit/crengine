@@ -33,6 +33,7 @@
 #include "../include/docxfmt.h"
 #include "../include/odtfmt.h"
 #include "mdfmt.h"
+#include <memory>
 
 /// to show page bounds rectangles
 //#define SHOW_PAGE_RECT
@@ -3489,7 +3490,8 @@ bool LVDocView::goLink(lString32 link, bool savePos) {
 	ldomNode * dest = m_doc->getNodeById(id);
 	if (!dest)
 		return false;
-	savePosToNavigationHistory();
+	if (savePos)
+		savePosToNavigationHistory();
 	ldomXPointer newPos(dest, 0);
 	goToBookmark(newPos);
         updateBookMarksRanges();
@@ -4461,6 +4463,7 @@ bool LVDocView::LoadDocument(LVStreamRef stream, bool metadataOnly) {
 
 #if (USE_ZLIB==1)
 
+#ifndef CR_MCU
         doc_format_t pdbFormat = doc_format_none;
         if ( DetectPDBFormat(m_stream, pdbFormat) ) {
             // PDB
@@ -4494,7 +4497,8 @@ bool LVDocView::LoadDocument(LVStreamRef stream, bool metadataOnly) {
         }
 
 
-		if ( DetectEpubFormat( m_stream ) ) {
+#endif
+		if ( (m_epubIndex && m_epubIndex->ready) || DetectEpubFormat( m_stream ) ) {
 			// EPUB
 			CRLog::info("EPUB format detected");
 			createEmptyDocument();
@@ -4506,7 +4510,7 @@ bool LVDocView::LoadDocument(LVStreamRef stream, bool metadataOnly) {
             updateDocStyleSheet();
             // See epubfmt.cpp's ExtractCoverFilenameFromCoverPageFragment()
             // for why we need to pass fb2_elem_table and such.
-            bool res = ImportEpubDocument( m_stream, m_doc, m_callback, this, metadataOnly, fb2_elem_table, fb2_attr_table, fb2_ns_table );
+            bool res = ImportEpubDocument( m_stream, m_doc, m_callback, this, metadataOnly, fb2_elem_table, fb2_attr_table, fb2_ns_table, m_epubIndex, m_epubChapter );
 			if ( !res ) {
 				setDocFormat( doc_format_none );
                 createDefaultDocument( cs32("ERROR: Error reading EPUB format"), cs32("Cannot open document") );
@@ -4535,6 +4539,7 @@ bool LVDocView::LoadDocument(LVStreamRef stream, bool metadataOnly) {
 			}
 		}
 
+#ifndef CR_MCU
         if( DetectFb3Format(m_stream) ) {
             CRLog::info("FB3 format detected");
             createEmptyDocument();
@@ -4631,6 +4636,7 @@ bool LVDocView::LoadDocument(LVStreamRef stream, bool metadataOnly) {
             }
         }
 
+#endif
 #if CHM_SUPPORT_ENABLED==1
         if ( DetectCHMFormat( m_stream ) ) {
 			// CHM
@@ -5034,6 +5040,7 @@ bool LVDocView::ParseDocument() {
 	createEmptyDocument();
 	setRenderProps(0, 0); // to allow apply styles and rend method while loading
 
+#ifndef CR_MCU
 	if (m_stream->GetSize() > DOCUMENT_CACHING_MIN_SIZE) {
 		// try loading from cache
 
@@ -5071,6 +5078,7 @@ bool LVDocView::ParseDocument() {
 		CRLog::info("Cannot get document from cache, parsing...");
 	}
 
+#endif
 	{
         ldomDocumentWriter writer(m_doc);
         ldomDocumentWriterFilter writerFilter(m_doc, false,
@@ -5083,46 +5091,42 @@ bool LVDocView::ParseDocument() {
         // that this causes no issue.
         // We might want to refactor this section to avoid any issue.
 
-        LVFileFormatParser * parser = NULL;
+        std::unique_ptr<LVFileFormatParser> parser;
         if (m_stream->GetSize() >= 5) {
             // Only check the following formats when the document is
             // at least 5 bytes: if not, go directly with plain text.
 
             /// FB2 format
             setDocFormat( doc_format_fb2);
-            parser = new LVXMLParser(m_stream, &writer, false, true);
+            parser.reset(new LVXMLParser(m_stream, &writer, false, true));
             if (!parser->CheckFormat()) {
-                delete parser;
-                parser = NULL;
+                parser.reset();
             }
 
             /// SVG format
             if (parser == NULL) {
                 setDocFormat( doc_format_svg);
-                parser = new LVXMLParser(m_stream, &writer, false, false, true);
+                parser.reset(new LVXMLParser(m_stream, &writer, false, false, true));
                 if (!parser->CheckFormat()) {
-                    delete parser;
-                    parser = NULL;
+                    parser.reset();
                 }
             }
 
             /// RTF format
             if (parser == NULL) {
                 setDocFormat( doc_format_rtf);
-                parser = new LVRtfParser(m_stream, &writer);
+                parser.reset(new LVRtfParser(m_stream, &writer));
                 if (!parser->CheckFormat()) {
-                    delete parser;
-                    parser = NULL;
+                    parser.reset();
                 }
             }
 
             /// HTML format
             if (parser == NULL) {
                 setDocFormat( doc_format_html);
-                parser = new LVHTMLParser(m_stream, &writerFilter);
+                parser.reset(new LVHTMLParser(m_stream, &writerFilter));
                 if (!parser->CheckFormat()) {
-                    delete parser;
-                    parser = NULL;
+                    parser.reset();
                 }
             }
 
@@ -5130,10 +5134,9 @@ bool LVDocView::ParseDocument() {
             if (parser == NULL) {
                 //m_text_format = txt_format_pre; // DEBUG!!!
                 setDocFormat( doc_format_txt_bookmark);
-                parser = new LVTextBookmarkParser(m_stream, &writer);
+                parser.reset(new LVTextBookmarkParser(m_stream, &writer));
                 if (!parser->CheckFormat()) {
-                    delete parser;
-                    parser = NULL;
+                    parser.reset();
                 }
             }
         }
@@ -5142,23 +5145,21 @@ bool LVDocView::ParseDocument() {
         if (parser == NULL) {
             //m_text_format = txt_format_pre; // DEBUG!!!
             setDocFormat( doc_format_txt);
-            parser = new LVTextParser(m_stream, &writer,
-                            getTextFormatOptions() == txt_format_pre);
+            parser.reset(new LVTextParser(m_stream, &writer,
+                            getTextFormatOptions() == txt_format_pre));
             if (!parser->CheckFormat()) {
-                delete parser;
-                parser = NULL;
+                parser.reset();
             }
         }
 
         /// plain text format (robust, never fail)
         if (parser == NULL) {
             setDocFormat( doc_format_txt);
-            parser = new LVTextRobustParser(m_stream, &writer,
-                             getTextFormatOptions() == txt_format_pre);
+            parser.reset(new LVTextRobustParser(m_stream, &writer,
+                             getTextFormatOptions() == txt_format_pre));
             if (!parser->CheckFormat()) {
                 // Never reached
-                delete parser;
-                parser = NULL;
+                parser.reset();
             }
         }
 
@@ -5188,7 +5189,7 @@ bool LVDocView::ParseDocument() {
 		// parse
 		parser->setProgressCallback(m_callback);
 		if (!parser->Parse()) {
-			delete parser;
+			parser.reset();
 			if (m_callback) {
                 m_callback->OnLoadFileError(cs32("Bad document format"));
 			}
@@ -5196,7 +5197,7 @@ bool LVDocView::ParseDocument() {
                     cs32("Cannot open document"));
 			return false;
 		}
-		delete parser;
+		parser.reset();
 		_pos = 0;
 		_page = 0;
 

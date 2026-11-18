@@ -12,6 +12,9 @@
 *******************************************************/
 
 #include "crsetup.h"
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 #include <stdlib.h>
 #include "../include/lvmemman.h"
@@ -72,7 +75,12 @@ void lvDefFatalErrorHandler (int errorCode, const char * errorText )
     fprintf( stderr, "FATAL ERROR #%d: %s\n", errorCode, errorText );
     // Uncomment to force a real crash when using gdb and wanting to see a backtrce
     // int * a = 0; *a = 1;
+#ifdef CR_MCU
+    // 中文：错误回到服务边界；固件不能退出进程。/ English: Return errors to the service boundary; firmware must never exit.
+    throw CreMcuFailure{CRE_CONTENT};
+#else
     exit( errorCode );
+#endif
 }
 
 lv_FatalErrorHandler_t * lvFatalErrorHandler = &lvDefFatalErrorHandler;

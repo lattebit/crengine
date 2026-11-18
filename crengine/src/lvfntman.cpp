@@ -53,6 +53,14 @@
 #include <freetype/ftglyph.h>    // for FT_Matrix_Multiply()
 #include <freetype/tttables.h>   // for FT_Get_Sfnt_Table()
 #include <freetype/ftmm.h>       // for FT_Get_MM_Var() / FT_Set_Var_Design_Coordinates()
+#ifdef CR_MCU
+#include "cre_mcu_internal.h"
+// 中文：所有字号共用受管字体流和预算。/ English: All sizes share managed font streams and budget.
+#define FT_New_Face cre_mcu_new_face
+#define FT_Init_FreeType cre_mcu_new_library
+#define FT_Done_FreeType FT_Done_Library
+#endif
+
 // FT_Done_MM_Var was added in FreeType 2.9; fall back to free() on older versions
 #if FREETYPE_MINOR >= 9 || FREETYPE_MAJOR > 2
 #  define FT_DONE_MM_VAR(lib, p) FT_Done_MM_Var(lib, p)
@@ -6844,11 +6852,22 @@ public:
         return false;
     }
     void clear() {
+        // 中文：列表标记可能引用字体自身，先解除引用再销毁缓存。
+        // English: List markers may reference their own font; break cycles before releasing the cache.
+        forEachFont([](LVFontRef &font) { font->clearFontRefs(); });
         _entries.clear();
     }
     // Evict instances whose face_id is in the provided set.
     // Call before removeFonts() so the registry still holds the face IDs.
     void evictFaces(const LVArray<lUInt32>& face_ids) {
+        for (int i = 0; i < _entries.length(); i++)
+            for (int j = 0; j < face_ids.length(); j++)
+                if (_entries[i].key.face_id == face_ids[j]) {
+                    LVFont *removed = _entries[i].font.get();
+                    removed->clearFontRefs();
+                    forEachFont([removed](LVFontRef &font) { font->clearFontRefs(removed); });
+                    break;
+                }
         for (int i = _entries.length() - 1; i >= 0; i--)
             for (int j = 0; j < face_ids.length(); j++)
                 if (_entries[i].key.face_id == face_ids[j]) {
@@ -6858,7 +6877,7 @@ public:
     }
     // Full reset used only in the destructor.
     void clearAll() {
-        _entries.clear();
+        clear();
     }
     int length() const { return _entries.length(); }
 
@@ -6872,6 +6891,7 @@ public:
     }
 
     void gc() {
+        forEachFont([](LVFontRef &font) { font->clearFontRefs(); });
         for (int i = _entries.length() - 1; i >= 0; i--) {
             if (_entries[i].font.isNull() || _entries[i].font.getRefCount() == 1)
                 _entries.remove(i);
@@ -8119,8 +8139,13 @@ public:
         LVFontRef cached = _instance_cache.get(key);
         if (!cached.isNull()) return cached;
 
-        return loadAndCache(*m.face, size, face_size, weight, italic,
-                            features, m.computed_variations, key);
+        LVFontRef loaded = loadAndCache(*m.face, size, face_size, weight, italic,
+                                       features, m.computed_variations, key);
+#ifdef CR_MCU
+        if (loaded.isNull() && cre_mcu_error() != CRE_OK)
+            throw CreMcuFailure{cre_mcu_error()};
+#endif
+        return loaded;
     }
 
     bool checkCharSet( FT_Face face )

@@ -2632,7 +2632,7 @@ class ldomNavigationHistory
 {
     private:
         lString32Collection _links;
-        int _pos;
+        int _pos = 0;
         void clearTail()
         {
             if (_links.length() > _pos)
