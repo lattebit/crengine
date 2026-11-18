@@ -22,6 +22,9 @@ Firmware uses `add_subdirectory(path/to/crengine/mcu)` and links `crengine::mcu`
 固件及裸机交叉构建使用 `-fno-rtti`；主机使用 `-frtti` 保留系统 C++ 动态库的异常类型身份。链接此目标的 C++ 调用方自动继承对应设置，避免混合标准库模板实例。C++ 异常仍保留并在 C 服务边界转为错误码。
 Firmware and bare-metal cross builds use `-fno-rtti`; hosts use `-frtti` to preserve exception type identities from the system C++ shared library. C++ callers inherit the corresponding setting to avoid mixed standard-library template instances. C++ exceptions remain enabled and are converted to error codes at the C service boundary.
 
+固件和裸机静态目标关闭 PIC，让只读表与虚函数表保留在 Flash；只有主机共享模块启用 PIC。固件集成应检查最终链接位置及内部 SRAM 预算。
+Firmware and bare-metal static targets disable PIC, keeping read-only tables and virtual tables in Flash; only host shared modules enable PIC. Firmware integration must verify final placement and internal SRAM budgets.
+
 使用交叉工具链时关闭主机测试。S31 使用 ESP-IDF 6.1 配套的 RISC-V GCC 15.2 工具链和 `rv32imafc/ilp32f`。静态库成功编译不能替代完整固件链接或实机测量。
 
 Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain bundled with ESP-IDF 6.1 and `rv32imafc/ilp32f`. A successful static build does not replace firmware linking or hardware measurement.

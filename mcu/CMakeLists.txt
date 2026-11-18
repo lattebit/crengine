@@ -13,6 +13,12 @@ foreach(dep freetype harfbuzz fribidi libunibreak utf8proc zlib xxhash md4c nano
         message(FATAL_ERROR "Initialize crengine dependencies: git submodule update --init --recursive")
     endif()
 endforeach()
+# 中文：固件固定地址链接；仅主机共享模块需要 PIC，避免只读指针表被复制进 SRAM。
+# English: Firmware links at fixed addresses; only host shared modules need PIC, avoiding read-only pointer tables copied into SRAM.
+set(CRE_MCU_PIC ON)
+if(ESP_PLATFORM OR CMAKE_SYSTEM_NAME STREQUAL "Generic")
+    set(CRE_MCU_PIC OFF)
+endif()
 include(dependencies.cmake)
 
 set(CRE_MCU_SOURCES
@@ -79,7 +85,7 @@ else()
 endif()
 target_link_libraries(crengine_mcu PUBLIC cre_freetype cre_harfbuzz cre_fribidi
     cre_unibreak cre_utf8proc cre_zlib cre_xxhash cre_md4c)
-set_target_properties(crengine_mcu PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(crengine_mcu PROPERTIES POSITION_INDEPENDENT_CODE ${CRE_MCU_PIC})
 
 if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     add_executable(cre_mcu_cpp_runtime_test tests/cpp_runtime.cpp)
