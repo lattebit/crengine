@@ -1722,9 +1722,11 @@ public:
     /// clear pointer (make null)
     void clear()
     {
+        // 中文：先准备替代值，分配失败时保留原引用。/ English: Prepare replacement first, preserving the original reference on failure.
+        XPointerData *replacement = new XPointerData();
         if (_data->decRef() == 0)
             delete _data;
-        _data = new XPointerData();
+        _data = replacement;
     }
     /// return document
 	inline ldomDocument * getDocument() { return _data->getDocument(); }
@@ -3087,6 +3089,10 @@ class ldomElementWriter
 */
 class ldomDocumentWriter : public LVXMLParserCallback
 {
+#if CR_MCU
+    bool _mcu_finished = false;
+    void finishMcu();
+#endif
 #if MATHML_SUPPORT==1
     friend class MathMLHelper;
 #endif

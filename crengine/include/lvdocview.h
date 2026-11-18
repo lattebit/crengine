@@ -963,8 +963,8 @@ public:
     /// returns whether there are any flows besides the linear flow 0
     bool hasNonLinearFlows();
 
-    /// clear view
-    void Clear();
+    /// 清理视图；析构时不再创建空锚点。/ Clear the view without creating empty anchors during destruction.
+    void Clear(bool destroying = false);
     /// load document from file
     bool LoadDocument( const char * fname, bool metadataOnly = false );
     /// 中文：借用索引直至视图关闭；负章节保持完整导入，用于基准对照。

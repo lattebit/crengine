@@ -26,6 +26,7 @@
 #include "lvmemman.h"
 #include "crlocks.h"
 #include "lvautoptr.h"
+#include <memory>
 
 /// Memory manager pool for ref counting
 /**
@@ -416,7 +417,11 @@ public:
     explicit LVRef( T * ptr ) {
         if (ptr)
         {
+            // 中文：引用计数分配失败时仍须释放刚接管的对象。
+            // English: Release the adopted object if allocating its reference counter fails.
+            std::unique_ptr<T> pending(ptr);
             _ptr = new ref_count_rec_t(ptr);
+            pending.release();
         }
         else
         {
@@ -476,8 +481,10 @@ public:
         {
             if (_ptr->_obj!=obj)
             {
-                Release();
-                _ptr = new ref_count_rec_t(obj);
+                LVRef replacement(obj);
+                ref_count_rec_t *previous = _ptr;
+                _ptr = replacement._ptr;
+                replacement._ptr = previous;
             }
         }
         return *this;

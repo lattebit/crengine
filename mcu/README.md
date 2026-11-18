@@ -110,6 +110,12 @@ ctest --test-dir build/mcu-test --output-on-failure
 
 Fixtures cover six formats, meaningful grayscale content, chapter-versus-full EPUB pixels, direct Markdown DOM versus MD4C HTML pixels, C-port anchors/links, and preview fault cleanup. The Markdown comparison explicitly aligns H1 pagination to remove the upstream `html-document` format-specific difference. Use a font covering CJK and Latin when checking multilingual pixels.
 
+C++ 分配失败测试覆盖文档打开与绘制的前 100 次分配及分散在全流程中的 64 个位置，并覆盖前 32 次和全流程 32 个位置的持续分配失败。错误必须回到 C 接口，关闭后释放资源；同一引擎中重新打开必须保持像素一致，不能靠关闭全局引擎恢复。可用 `cre_mcu_allocation_failure_test FONT FIXTURES --case OFFSET DRAW` 单独复现；`DRAW` 为 0 表示从打开开始，为 1 表示从绘制开始。设置 `CRE_TEST_ALLOCATION_TRACE=1` 打印失败栈。
+C++ allocation tests inject one-shot failures into the first 100 allocations and 64 positions spanning document open/draw, plus persistent failures in the first 32 allocations and 32 positions spanning each operation. Errors must return through the C API and closing must release resources. Reopening in the same engine must retain identical pixels, without global shutdown for recovery. Reproduce one case with the command above: `DRAW=0` starts at open and `DRAW=1` at draw. Set `CRE_TEST_ALLOCATION_TRACE=1` for failure stacks.
+
+MCU 解析器在 `OnStop()` 中完成可能分配内存的样式收尾；析构只释放未完成的栈节点。直接构造文档的调用方也必须调用 `OnStop()`。CSS 临时链和引用计数采用失败安全的所有权交接；字体注销不创建临时列表，文档注销后仍释放未持久化节点。以上错误清理不等同于全部引擎分配已计入硬预算。
+MCU parsers finish potentially allocating style work in `OnStop()`; destruction only releases unfinished stack nodes. Direct document builders must call `OnStop()` too. CSS temporary chains and reference counters transfer ownership safely on failure; font unregistration allocates no temporary list, and mutable nodes are released after document unregistration. These cleanup guarantees do not imply that every engine allocation is accounted against the hard budget.
+
 中文禁则测试检查真实字符坐标，覆盖十三种行宽下的行首行尾标点、组合音符、成对破折号和省略号及不可断空格。嵌入字体测试对照普通字体的多字号像素，并验证分块读取、共享读取缓存和失败清理。
 Typography tests inspect real character positions across thirteen widths for opening/closing punctuation, combining marks, paired dashes/ellipses and nonbreaking spaces. Embedded-font tests compare ordinary-font pixels at multiple sizes and verify chunked reads, shared read caching and failure cleanup.
 

@@ -1019,6 +1019,9 @@ void createEncryptedEpubWarningDocument(ldomDocument * m_doc) {
     writer.OnTagClose(NULL, U"p");
 
     writer.OnTagClose(NULL, U"body");
+#if CR_MCU
+    writer.OnStop();
+#endif
 }
 
 LVStreamRef GetEpubCoverpage(LVContainerRef arc)

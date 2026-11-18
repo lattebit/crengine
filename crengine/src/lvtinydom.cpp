@@ -9326,6 +9326,10 @@ ldomElementWriter * ldomDocumentWriter::pop( ldomElementWriter * obj, lUInt16 id
         tmp2 = tmp->_parent;
         bool stop = (tmp->getElement()->getNodeId() == id);
         ElementCloseHandler( tmp->getElement() );
+#if CR_MCU
+        tmp->onBodyExit();
+        if (_currNode == tmp) _currNode = tmp2;
+#endif
         delete tmp;
         if ( stop )
             return tmp2;
@@ -9344,7 +9348,9 @@ ldomElementWriter::~ldomElementWriter()
 {
     //CRLog::trace("~ldomElementWriter for element 0x%04x %s", _element->getDataIndex(), LCSTR(_element->getNodeName()));
     //getElement()->persist();
+#if !CR_MCU
     onBodyExit();
+#endif
 }
 
 
@@ -9369,6 +9375,9 @@ ldomElementWriter::~ldomElementWriter()
 // overrides
 void ldomDocumentWriter::OnStart(LVFileFormatParser * parser)
 {
+#if CR_MCU
+    _mcu_finished = false;
+#endif
     //logfile << "ldomDocumentWriter::OnStart()\n";
     // add document root node
     //CRLog::trace("ldomDocumentWriter::OnStart()");
@@ -9387,6 +9396,9 @@ void ldomDocumentWriter::OnStop()
     //logfile << "ldomDocumentWriter::OnStop()\n";
     while (_currNode)
         _currNode = pop( _currNode, _currNode->getElement()->getNodeId() );
+#if CR_MCU
+    finishMcu();
+#endif
 }
 
 /// called after > of opening tag (when entering tag body)
@@ -9543,6 +9555,18 @@ ldomNode * ldomDocumentWriter::OnTagOpen( const lChar32 * nsname, const lChar32 
 
 ldomDocumentWriter::~ldomDocumentWriter()
 {
+#if CR_MCU
+    // 中文：析构只释放栈节点，不给未完成的 DOM 补样式或申请内存。
+    // English: Destruction only releases stack nodes, without styling an incomplete DOM or allocating memory.
+    while (_currNode) {
+        auto *node = _currNode; _currNode = node->_parent; delete node;
+    }
+}
+void ldomDocumentWriter::finishMcu()
+{
+    if (_mcu_finished) return;
+    _mcu_finished = true;
+#endif
     while (_currNode)
         _currNode = pop( _currNode, _currNode->getElement()->getNodeId() );
 #if BUILD_LITE!=1
@@ -17321,7 +17345,14 @@ lUInt16 ldomDocumentWriterFilter::popUpTo( ldomElementWriter * target, lUInt16 t
             else {
                 _currNode = _currNode->_parent;
             }
+#if CR_MCU
+            // 中文：当前栈已前移，关闭失败仍由本层释放摘下的节点。
+            // English: The current stack already advanced; this scope still releases its detached node on failure.
+            try { ElementCloseHandler(tmp->getElement()); tmp->onBodyExit(); }
+            catch (...) { delete tmp; throw; }
+#else
             ElementCloseHandler( tmp->getElement() );
+#endif
             delete tmp;
             if ( done )
                 break;
@@ -19815,9 +19846,9 @@ void tinyNodeCollection::compact()
 /// allocate new tinyElement
 ldomNode * tinyNodeCollection::allocTinyElement( ldomNode * parent, lUInt16 nsid, lUInt16 id )
 {
+    auto elem = std::make_unique<tinyElement>((ldomDocument*)this, parent, nsid, id);
     ldomNode * node = allocTinyNode( ldomNode::NT_ELEMENT );
-    tinyElement * elem = new tinyElement( (ldomDocument*)this, parent, nsid, id );
-    node->NPELEM = elem;
+    node->NPELEM = elem.release();
     return node;
 }
 
@@ -19849,7 +19880,9 @@ lUInt8 ldomNode::getNodeLevel() const
 
 void ldomNode::onCollectionDestroy()
 {
-    if ( isNull() )
+    // 中文：文档已注销时仍须归还未持久化节点，不能把失效的文档当作空节点。
+    // English: Release mutable nodes even after document unregistration; an expired document is not an empty node.
+    if ( _handle._dataIndex == 0 )
         return;
     //CRLog::trace("ldomNode::onCollectionDestroy(%d) type=%d", this->_handle._dataIndex, TNTYPE);
     switch ( TNTYPE ) {
@@ -19860,7 +19893,7 @@ void ldomNode::onCollectionDestroy()
     case NT_ELEMENT:
         // ???
 #if BUILD_LITE!=1
-        getDocument()->clearNodeStyle( _handle._dataIndex );
+        if (getDocument()) getDocument()->clearNodeStyle( _handle._dataIndex );
 #endif
         delete NPELEM;
         NPELEM = NULL;
@@ -23009,7 +23042,7 @@ ldomNode * ldomNode::modify()
         if ( isElement() ) {
             // PELEM->ELEM
             ElementDataStorageItem * data = getDocument()->_elemStorage.getElem(_data._pelem_addr);
-            tinyElement * elem = new tinyElement(getDocument(), getParentNode(), data->nsid, data->id );
+            auto elem = std::make_unique<tinyElement>(getDocument(), getParentNode(), data->nsid, data->id);
             for ( int i=0; i<data->childCount; i++ )
                 elem->_children.add( data->children[i] );
             for ( int i=0; i<data->attrCount; i++ )
@@ -23017,14 +23050,15 @@ ldomNode * ldomNode::modify()
             _handle._dataIndex = (_handle._dataIndex & ~0xF) | NT_ELEMENT;
             elem->_rendMethod = (lvdom_element_render_method)data->rendMethod;
             getDocument()->_elemStorage.freeNode( _data._pelem_addr );
-            NPELEM = elem;
+            NPELEM = elem.release();
         } else {
             // PTEXT->TEXT
             // convert persistent text to mutable
             lString8 utf8 = getDocument()->_textStorage.getText(_data._ptext_addr);
             lUInt32 parentIndex = getDocument()->_textStorage.getParent(_data._ptext_addr);
+            auto text = std::make_unique<ldomTextNode>(parentIndex, utf8);
             getDocument()->_textStorage.freeNode( _data._ptext_addr );
-            _data._text_ptr = new ldomTextNode( parentIndex, utf8 );
+            _data._text_ptr = text.release();
             // change type
             _handle._dataIndex = (_handle._dataIndex & ~0xF) | NT_TEXT;
         }

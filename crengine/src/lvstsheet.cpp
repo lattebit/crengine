@@ -20,6 +20,7 @@
 #include "../include/fb2def.h"
 #include "../include/lvstream.h"
 #include "../include/lvrend.h"   // for -cr-only-if:
+#include <memory>
 
 // define to dump all tokens
 //#define DUMP_CSS_PARSING
@@ -7426,20 +7427,20 @@ LVCssSelectorRule * parse_attr( const char * &str, lxmlDocBase * doc, bool usera
         str++;
         if (!parse_uident( str, attrvalue, 512 ))
             return NULL;
-        LVCssSelectorRule * rule = new LVCssSelectorRule(cssrt_class);
+        auto rule = std::make_unique<LVCssSelectorRule>(cssrt_class);
         const lString32 s( attrvalue );
         // s.lowercase(); // className should be case sensitive
         rule->setAttr(attr_class, s);
-        return rule;
+        return rule.release();
     } else if ( *str=='#' ) {
         // E#id
         str++;
         if (!parse_uident( str, attrvalue, 512 ))
             return NULL;
-        LVCssSelectorRule * rule = new LVCssSelectorRule(cssrt_id);
+        auto rule = std::make_unique<LVCssSelectorRule>(cssrt_id);
         const lString32 s( attrvalue );
         rule->setAttr(attr_id, s);
-        return rule;
+        return rule.release();
     } else if ( *str==':' ) {
         // E:pseudo-class (eg: E:first-child)
         str++;
@@ -7462,21 +7463,22 @@ LVCssSelectorRule * parse_attr( const char * &str, lxmlDocBase * doc, bool usera
             str++;
             // We should parse a list of selectors, with possibly other nested :is()...,
             // so trust our selector parsing code
-            LVCssSelector * first_selector = NULL;
+            std::unique_ptr<LVCssSelector> first_selector;
             LVCssSelector * prev_selector = NULL;
-            LVCssSelector * selector = NULL;
+            std::unique_ptr<LVCssSelector> selector;
             bool has_invalid_selectors = false;
             while ( *str ) {
-                selector = new LVCssSelector();
+                selector.reset(new LVCssSelector());
                 if ( selector->parse(str, doc, useragent_sheet, true) ) {
+                    auto *current = selector.get();
                     if ( !first_selector )
-                        first_selector = selector;
-                    if ( prev_selector )
-                        prev_selector->setNext( selector );
-                    prev_selector = selector;
+                        first_selector.reset(selector.release());
+                    else
+                        prev_selector->setNext(selector.release());
+                    prev_selector = current;
                 }
                 else {
-                    delete selector;
+                    selector.reset();
                     // With :is() or :where(), we should just ignore unsupported selectors,
                     // and continue parsing others.
                     // With :not(), we'll fail, but keep parsing properly so the parsing
@@ -7496,18 +7498,17 @@ LVCssSelectorRule * parse_attr( const char * &str, lxmlDocBase * doc, bool usera
                         // and return a valid but non-matching LVCssSelectorRule.
                         break;
                     }
-                    LVCssSelectorRule * rule = new LVCssSelectorRule(cssrt_pseudoclass);
+                    auto rule = std::make_unique<LVCssSelectorRule>(cssrt_pseudoclass);
                     rule->setAttr(n, lString32::empty_str);
-                    rule->setSubSelectors(LVCssSelectorRef(first_selector));
-                    return rule;
+                    rule->setSubSelectors(LVCssSelectorRef(first_selector.release()));
+                    return rule.release();
                 }
                 // Either ',' met (and skipped by skip_to_next()) and we should expect another selector,
                 // or end of string and we'll just exit the loop.
                 continue;
             }
             // No proper ')' met, or not() with some invalid selector: invalid, clean up
-            if ( first_selector )
-                delete first_selector;
+            first_selector.reset();
             return NULL;
         }
         // Generic parsing of other pseudo classes
@@ -7521,7 +7522,7 @@ LVCssSelectorRule * parse_attr( const char * &str, lxmlDocBase * doc, bool usera
             // But for the ones we handle, we only compare strings to a fixed set of target
             // values, so trim() and lowercase() below to avoid doing it on each check.
         }
-        LVCssSelectorRule * rule = new LVCssSelectorRule(cssrt_pseudoclass);
+        auto rule = std::make_unique<LVCssSelectorRule>(cssrt_pseudoclass);
         lString32 s( attrvalue );
         s.trim().lowercase();
         if ( n == csspc_nth_child || n == csspc_nth_of_type || n == csspc_nth_last_child || n == csspc_nth_last_of_type ) {
@@ -7541,7 +7542,7 @@ LVCssSelectorRule * parse_attr( const char * &str, lxmlDocBase * doc, bool usera
             // while loading would have created some autoBoxing that we won't be
             // able to remove...
         }
-        return rule;
+        return rule.release();
     } else if (*str != '[') // We're looking for an attribute selector after here
         return NULL;
     str++;
@@ -7627,7 +7628,7 @@ LVCssSelectorRule * parse_attr( const char * &str, lxmlDocBase * doc, bool usera
     {
         return NULL;
     }
-    LVCssSelectorRule * rule = new LVCssSelectorRule(st);
+    auto rule = std::make_unique<LVCssSelectorRule>(st);
     lString32 s( attrvalue );
     if (parse_trailing_i) { // cssrt_attr*_i met
         s.lowercase();
@@ -7647,7 +7648,7 @@ LVCssSelectorRule * parse_attr( const char * &str, lxmlDocBase * doc, bool usera
         id = doc->getAttrNameIndex( lString32(attrname).c_str() );
     }
     rule->setAttr(id, s);
-    return rule;
+    return rule.release();
 }
 
 static void insertRule(LVCssSelectorRule * rule, LVCssSelectorRule * & start, LVCssSelectorRule * & anchor, bool anchorable) {
@@ -7690,6 +7691,7 @@ bool LVCssSelector::parse( const char * &str, lxmlDocBase * doc, bool useragent_
     if (!str || !*str)
         return false;
     bool res = false;
+    std::unique_ptr<LVCssSelectorRule> pending;
     LVCssSelectorRule * start = nullptr;
     LVCssSelectorRule * anchor = nullptr;
     for (;;)
@@ -7816,6 +7818,7 @@ bool LVCssSelector::parse( const char * &str, lxmlDocBase * doc, bool useragent_
                     goto exit;
                 }
                 insertRule( rule, start, anchor, true );
+                pending.release(); pending.reset(start);
                 _specificity += rule->getWeight();
 
                 /*
@@ -7844,6 +7847,7 @@ bool LVCssSelector::parse( const char * &str, lxmlDocBase * doc, bool useragent_
             LVCssSelectorRule * rule = new LVCssSelectorRule(cssrt_parent);
             rule->setId(_id);
             insertRule( rule, start, anchor, false );
+            pending.release(); pending.reset(start);
             _specificity += rule->getWeight();
             _id=0;
             continue;
@@ -7854,6 +7858,7 @@ bool LVCssSelector::parse( const char * &str, lxmlDocBase * doc, bool useragent_
             LVCssSelectorRule * rule = new LVCssSelectorRule(cssrt_predecessor);
             rule->setId(_id);
             insertRule( rule, start, anchor, false );
+            pending.release(); pending.reset(start);
             _specificity += rule->getWeight();
             _id=0;
             continue;
@@ -7864,6 +7869,7 @@ bool LVCssSelector::parse( const char * &str, lxmlDocBase * doc, bool useragent_
             LVCssSelectorRule * rule = new LVCssSelectorRule(cssrt_predsibling);
             rule->setId(_id);
             insertRule( rule, start, anchor, false );
+            pending.release(); pending.reset(start);
             _specificity += rule->getWeight();
             _id=0;
             continue;
@@ -7873,6 +7879,7 @@ bool LVCssSelector::parse( const char * &str, lxmlDocBase * doc, bool useragent_
             LVCssSelectorRule * rule = new LVCssSelectorRule(cssrt_ancessor);
             rule->setId(_id);
             insertRule( rule, start, anchor, false );
+            pending.release(); pending.reset(start);
             _specificity += rule->getWeight();
             _id=0;
             continue;
@@ -7892,7 +7899,7 @@ bool LVCssSelector::parse( const char * &str, lxmlDocBase * doc, bool useragent_
         }
     }
 exit:
-    _rules = start;
+    _rules = pending.release();
     return res;
 }
 
@@ -8212,6 +8219,8 @@ lUInt32 LVStyleSheet::getHash() const
 static void insert_into_selectors(LVCssSelector *item, LVPtrVector<LVCssSelector> &selectors) {
     lUInt16 id = item->getElementNameId();
     if (id >= selectors.length() || !selectors[id]) {
+        // 中文：先完成可能失败的扩容，再转移链表所有权。/ English: Complete fallible growth before transferring chain ownership.
+        selectors.reserve(id + 1);
         item->setNext(NULL);
         selectors.set(id, item);
         return;
@@ -8242,6 +8251,9 @@ bool LVStyleSheet::parseAndAdvance( const char * &str, bool useragent_sheet, lSt
     LVCssSelector * prev_selector;
     for (;*str;)
     {
+        // 中文：解析失败或分配异常时释放尚未加入样式表的整条选择器链。
+        // English: Release the uncommitted selector chain on parse failure or allocation exceptions.
+        std::unique_ptr<LVCssSelector> pending;
         // new rule
         prev_selector = NULL;
         bool err = false;
@@ -8254,6 +8266,7 @@ bool LVStyleSheet::parseAndAdvance( const char * &str, bool useragent_sheet, lSt
             selector = new LVCssSelector(_selector_count);
             _selector_count += 1; // = +WEIGHT_SELECTOR_ORDER
             selector->setNext( prev_selector );
+            pending.release(); pending.reset(selector);
             if ( !selector->parse(str, _doc, useragent_sheet) )
             {
                 err = true;
@@ -8296,7 +8309,7 @@ bool LVStyleSheet::parseAndAdvance( const char * &str, bool useragent_sheet, lSt
         {
             // error:
             // delete chain of selectors
-            delete selector;
+            pending.reset();
             // We may have stumbled on a @ rule (@namespace, @media...): parse or skip it properly
             if ( *str == '@' ) {
                 parse_or_skip_at_rule(str, _doc, codeBase, true, this);
@@ -8318,6 +8331,7 @@ bool LVStyleSheet::parseAndAdvance( const char * &str, bool useragent_sheet, lSt
             for (LVCssSelector * next, * p = selector; p; p = next) {
                 next = p->getNext();
                 insert_into_selectors(p, _selectors);
+                pending.release(); pending.reset(next);
             }
         }
     }

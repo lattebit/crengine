@@ -235,7 +235,7 @@ LVDocView::LVDocView(int bitsPerPixel, bool noDefaultDocument) :
 }
 
 LVDocView::~LVDocView() {
-	Clear();
+	Clear(true);
 }
 
 /// get text format options
@@ -543,7 +543,7 @@ void LVDocView::gatherStylesheetsMatchingRulesets( lUInt32 nodeDataIndex, lStrin
     }
 }
 
-void LVDocView::Clear() {
+void LVDocView::Clear(bool destroying) {
 	{
 		LVLock lock(getMutex());
 #if CR_MCU
@@ -559,13 +559,15 @@ void LVDocView::Clear() {
 			m_container.Clear();
 		if (!m_arc.isNull())
 			m_arc.Clear();
-		_posBookmark = ldomXPointer();
+        // 中文：析构由成员归还锚点，内存不足时不得再分配空锚点。
+        // English: Members release anchors during destruction; do not allocate empty anchors under memory pressure.
+		if (!destroying) _posBookmark.clear();
 		m_is_rendered = false;
 		m_swapDone = false;
 		_pos = 0;
 		_page = 0;
 		_posIsSet = false;
-		m_cursorPos.clear();
+		if (!destroying) m_cursorPos.clear();
 		m_filename.clear();
 		m_section_bounds_valid = false;
 	}
@@ -4438,6 +4440,9 @@ void LVDocView::createDefaultDocument(lString32 title, lString32 message) {
     m_doc->setProps(m_doc_props);
 
     m_doc_props->setString(DOC_PROP_TITLE, title);
+#if CR_MCU
+    writer.OnStop();
+#endif
 
     REQUEST_RENDER("resize")
 }

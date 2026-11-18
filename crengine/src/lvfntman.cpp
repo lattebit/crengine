@@ -6897,23 +6897,18 @@ public:
         forEachFont([](LVFontRef &font) { font->clearFontRefs(); });
         _entries.clear();
     }
-    // Evict instances whose face_id is in the provided set.
-    // Call before removeFonts() so the registry still holds the face IDs.
-    void evictFaces(const LVArray<lUInt32>& face_ids) {
+    // 中文：按字体身份原地清理，不为内存不足的收尾过程创建临时列表。
+    // English: Evict by face identity in place without allocating a temporary list during low-memory cleanup.
+    void evictFace(lUInt32 face_id) {
         for (int i = 0; i < _entries.length(); i++)
-            for (int j = 0; j < face_ids.length(); j++)
-                if (_entries[i].key.face_id == face_ids[j]) {
-                    LVFont *removed = _entries[i].font.get();
-                    removed->clearFontRefs();
-                    forEachFont([removed](LVFontRef &font) { font->clearFontRefs(removed); });
-                    break;
-                }
+            if (_entries[i].key.face_id == face_id) {
+                LVFont *removed = _entries[i].font.get();
+                removed->clearFontRefs();
+                forEachFont([removed](LVFontRef &font) { font->clearFontRefs(removed); });
+            }
         for (int i = _entries.length() - 1; i >= 0; i--)
-            for (int j = 0; j < face_ids.length(); j++)
-                if (_entries[i].key.face_id == face_ids[j]) {
-                    _entries.remove(i);
-                    break;
-                }
+            if (_entries[i].key.face_id == face_id)
+                _entries.remove(i);
     }
     // Full reset used only in the destructor.
     void clearAll() {
@@ -8425,16 +8420,14 @@ public:
 
     /// unregisters all document fonts
     virtual void UnregisterDocumentFonts(int documentId) {
-        LVArray<lUInt32> face_ids;
         for (int i = 0; i < _registry.familyCount(); i++) {
             const LVFontFamily* fam = _registry.familyAt(i);
             for (int j = 0; j < fam->faceCount(); j++) {
                 const LVFontFace& face = fam->faceAt(j);
                 if (face.documentId == documentId)
-                    face_ids.add(face.id());
+                    _instance_cache.evictFace(face.id());
             }
         }
-        _instance_cache.evictFaces(face_ids);
         _registry.removeFonts(documentId);
     }
 
