@@ -10,6 +10,9 @@
 #undef FT_CONFIG_OPTION_MAC_FONTS
 #undef FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK
 #undef FT_CONFIG_OPTION_SVG
+// 中文：字体只使用共享文件流；不接受由调用方逐字形注入的数据。
+// English: Fonts use shared file streams, never caller-supplied incremental glyph data.
+#undef FT_CONFIG_OPTION_INCREMENTAL
 #undef FT_RENDER_POOL_SIZE
 // 中文：栅格器按带细分，缩小栈池不改变像素结果。
 // English: Banded rasterization preserves pixels with a smaller stack pool.
