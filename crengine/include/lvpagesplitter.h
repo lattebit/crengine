@@ -235,8 +235,34 @@ public:
 class LVRendPageList : public LVPtrVector<LVRendPageInfo>
 {
     bool has_nonlinear_flows;
+#if CR_MCU
+    struct McuGeometry { lInt32 start; lInt16 height; lInt8 flags; lUInt16 flow; };
+    McuGeometry *_mcu_index = nullptr;
+    int _mcu_count = 0;
+    void *_mcu_context = nullptr;
+    bool (*_mcu_read)(void *, unsigned, SerialBuf &) = nullptr;
+    McuGeometry mcuGeometry(int index) const;
+    void detachMcuIndex();
+#endif
 public:
     LVRendPageList() : has_nonlinear_flows(false) {}
+#if CR_MCU
+    ~LVRendPageList();
+    void clear();
+    LVRendPageInfo *get(int index) const;
+    LVRendPageInfo **get();
+    LVRendPageInfo *operator[](int index) const { return get(index); }
+    LVRendPageInfo *&operator[](int index) { get(index); return LVPtrVector<LVRendPageInfo>::operator[](index); }
+    /// 紧凑定位目录与单页记录分开保存。/ Persist compact positioning metadata separately from individual page records.
+    bool serializeMcuIndex(SerialBuf &buffer);
+    static bool validateMcuIndex(SerialBuf &buffer);
+    bool restoreMcuIndex(SerialBuf &buffer, void *context, bool (*read)(void *, unsigned, SerialBuf &));
+    /// 检查点完成后可回收页对象；调用内保留裸指针有效。/ Reclaim page objects after checkpoints, retaining raw pointers throughout a call.
+    bool captureMcuIndex(void *context, bool (*read)(void *, unsigned, SerialBuf &));
+    void trimMcuPages(int keep);
+    int mcuCachedPages() const { return _mcu_count; }
+    int mcuLoadedPages() const;
+#endif
     int FindNearestPage( int y, int direction );
     void setHasNonLinearFlows( bool hasnonlinearflows ) { has_nonlinear_flows = hasnonlinearflows; }
     bool hasNonLinearFlows() { return has_nonlinear_flows; }

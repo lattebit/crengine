@@ -27,6 +27,9 @@ static std::vector<uint8_t> draw(LVDocView &view, unsigned page) {
     assert(view.goToPage(page)); LVGrayDrawBuf buffer(480, 640, 8); buffer.Clear(0xffffff); view.Draw(buffer, false);
     std::vector<uint8_t> result(480 * 640);
     for (int y = 0; y < 640; ++y) std::memcpy(result.data() + y * 480, buffer.GetScanLine(y), 480);
+    auto *pages = view.getPageList();
+    assert(pages->mcuLoadedPages() <= pages->length() - pages->mcuCachedPages() + 5);
+    pages->trimMcuPages(int(page));
     return result;
 }
 static void failures(const std::string &path, Platform &platform) {
@@ -97,6 +100,7 @@ int main(int argc, char **argv) {
         partial.reset(); stream.Clear(); stream = cre_layout_stream(io, 1, true); partial = load(path, stream, 1);
         assert(partial->getDocument()->mcuPagesComplete() && partial->getPageCount() == full->getPageCount());
         assert(draw(*partial, full->getPageCount() - 1) == draw(*full, full->getPageCount() - 1));
+        assert(partial->getPageList()->mcuLoadedPages() <= 3);
         std::printf("%s cached pages=%d blocks=%zu writes=%u\n", file, full->getPageCount(), records.data.size(), records.writes);
     }
     cre_mcu_shutdown(); assert(!platform.files && !platform.live);

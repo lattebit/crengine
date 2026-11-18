@@ -31,13 +31,109 @@
 // (Also change '#if 0' around 'For debugging lvpagesplitter.cpp'
 // to '#if 1' in src/lvdocview.cpp to get a summary of pages.
 
+#if CR_MCU
+LVRendPageList::~LVRendPageList() { cre_mcu_release(_mcu_index); }
+void LVRendPageList::clear() {
+    cre_mcu_release(_mcu_index); _mcu_index = nullptr; _mcu_count = 0;
+    _mcu_context = nullptr; _mcu_read = nullptr; has_nonlinear_flows = false;
+    LVPtrVector<LVRendPageInfo>::clear();
+}
+LVRendPageList::McuGeometry LVRendPageList::mcuGeometry(int index) const {
+    if (index < _mcu_count) return _mcu_index[index];
+    auto *page = LVPtrVector<LVRendPageInfo>::get(index);
+    return {page->start, page->height, page->flags, page->flow};
+}
+LVRendPageInfo *LVRendPageList::get(int index) const {
+    auto *page = LVPtrVector<LVRendPageInfo>::get(index);
+    if (!page && index >= 0 && index < _mcu_count && _mcu_read) {
+        cre_mcu_checkpoint(); SerialBuf data(0, true);
+        if (!_mcu_read(_mcu_context, unsigned(index), data)) throw CreMcuFailure{CRE_CONTENT};
+        auto item = std::make_unique<LVRendPageInfo>();
+        if (!item->deserialize(data) || data.pos() != data.size()) throw CreMcuFailure{CRE_CONTENT};
+        const auto &geometry = _mcu_index[index];
+        if (item->start != geometry.start || item->height != geometry.height || item->flags != geometry.flags || item->flow != geometry.flow)
+            throw CreMcuFailure{CRE_CONTENT};
+        item->index = index; page = item.release();
+        const_cast<LVRendPageList *>(this)->LVPtrVector<LVRendPageInfo>::operator[](index) = page;
+    }
+    return page;
+}
+LVRendPageInfo **LVRendPageList::get() {
+    for (int i = 0; i < length(); ++i) get(i);
+    return LVPtrVector<LVRendPageInfo>::get();
+}
+void LVRendPageList::detachMcuIndex() {
+    for (int i = 0; i < _mcu_count; ++i) get(i);
+    cre_mcu_release(_mcu_index); _mcu_index = nullptr; _mcu_count = 0; _mcu_read = nullptr; _mcu_context = nullptr;
+}
+bool LVRendPageList::serializeMcuIndex(SerialBuf &buffer) {
+    if (length() < 0 || length() > 65535 || buffer.error()) return false;
+    buffer.putMagic("MCUP2"); int start = buffer.pos(); buffer << lUInt32(length()) << lUInt8(has_nonlinear_flows);
+    for (int i = 0; i < length(); ++i) {
+        cre_mcu_checkpoint(); auto value = mcuGeometry(i);
+        buffer << value.start << value.height << lUInt8(value.flags) << value.flow;
+    }
+    buffer.putCRC(buffer.pos() - start); return !buffer.error();
+}
+bool LVRendPageList::validateMcuIndex(SerialBuf &buffer) {
+    if (buffer.error() || !buffer.checkMagic("MCUP2")) return false;
+    int start = buffer.pos(); lUInt32 count = 0; lUInt8 nonlinear = 0;
+    buffer >> count >> nonlinear;
+    if (buffer.error() || count > 65535 || nonlinear > 1 || buffer.space() != int(count * 9 + 4)) return false;
+    for (unsigned i = 0; i < count; ++i) {
+        cre_mcu_checkpoint(); McuGeometry value{}; lUInt8 flags = 0;
+        buffer >> value.start >> value.height >> flags >> value.flow;
+        if (value.height < 0 || !(flags & (RN_PAGE_TYPE_NORMAL | RN_PAGE_TYPE_COVER))
+            || (flags & ~(RN_PAGE_TYPE_NORMAL | RN_PAGE_TYPE_COVER | RN_PAGE_MOSTLY_RTL | RN_PAGE_FOOTNOTES_MOSTLY_RTL))) return false;
+    }
+    return buffer.checkCRC(buffer.pos() - start) && !buffer.error() && !buffer.space();
+}
+bool LVRendPageList::restoreMcuIndex(SerialBuf &buffer, void *context, bool (*read)(void *, unsigned, SerialBuf &)) {
+    if (!read || !validateMcuIndex(buffer)) return false;
+    clear(); buffer.setPos(0); buffer.checkMagic("MCUP2"); lUInt32 count = 0; lUInt8 nonlinear = 0; buffer >> count >> nonlinear;
+    auto *index = static_cast<McuGeometry *>(cre_mcu_allocate_optional(size_t(count) * sizeof(McuGeometry)));
+    if (count && !index) return false;
+    _mcu_index = index; _mcu_count = int(count); _mcu_context = context; _mcu_read = read; has_nonlinear_flows = nonlinear;
+    reserve(count);
+    for (unsigned i = 0; i < count; ++i) {
+        if (!(i % 256)) cre_mcu_checkpoint();
+        lUInt8 flags = 0; buffer >> index[i].start >> index[i].height >> flags >> index[i].flow; index[i].flags = flags;
+        add(nullptr);
+    }
+    return true;
+}
+bool LVRendPageList::captureMcuIndex(void *context, bool (*read)(void *, unsigned, SerialBuf &)) {
+    std::unique_ptr<McuGeometry, decltype(&cre_mcu_release)> index(
+        static_cast<McuGeometry *>(cre_mcu_allocate_optional(size_t(length()) * sizeof(McuGeometry))), cre_mcu_release);
+    if (length() && !index) return false;
+    for (int i = 0; i < length(); ++i) {
+        if (!(i % 256)) cre_mcu_checkpoint();
+        index.get()[i] = mcuGeometry(i);
+    }
+    cre_mcu_release(_mcu_index); _mcu_index = index.release(); _mcu_count = length(); _mcu_context = context; _mcu_read = read; return true;
+}
+void LVRendPageList::trimMcuPages(int keep) {
+    for (int i = 0; i < _mcu_count; ++i) {
+        if (i >= keep - 1 && i <= keep + 1) continue;
+        auto *&page = LVPtrVector<LVRendPageInfo>::operator[](i); delete page; page = nullptr;
+    }
+}
+int LVRendPageList::mcuLoadedPages() const {
+    int count = 0; for (int i = 0; i < length(); ++i) count += LVPtrVector<LVRendPageInfo>::get(i) != nullptr; return count;
+}
+#endif
+
 int LVRendPageList::FindNearestPage( int y, int direction )
 {
     if (!length())
         return 0;
     for (int i=0; i<length(); i++)
     {
+#if CR_MCU
+        auto geometry = mcuGeometry(i); const auto *pi = &geometry;
+#else
         const LVRendPageInfo * pi = ((*this)[i]);
+#endif
         if (y<pi->start) {
             if (i==0 || direction>=0)
                 return i;
@@ -1662,6 +1758,9 @@ bool LVRendPageInfo::deserialize( SerialBuf & buf )
 
 void LVRendPageList::replacePages(int old_y, int old_h, LVRendPageList * pages, int next_pages_shift_y)
 {
+#if CR_MCU
+    detachMcuIndex(); pages->detachMcuIndex();
+#endif
     int remove_idx = -1;
     int remove_count = 0;
     int insert_idx = -1;

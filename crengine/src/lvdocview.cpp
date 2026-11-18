@@ -546,6 +546,9 @@ void LVDocView::gatherStylesheetsMatchingRulesets( lUInt32 nodeDataIndex, lStrin
 void LVDocView::Clear() {
 	{
 		LVLock lock(getMutex());
+#if CR_MCU
+        m_pages.clear();
+#endif
 		if (m_doc)
 			delete m_doc;
 		m_doc = NULL;

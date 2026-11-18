@@ -268,12 +268,12 @@ extern "C" int cre_document_checkpoint(cre_document *d) {
     if (!d) return CRE_INVALID;
     int result = boundary([&]() -> int {
         if (d->sources) cre_source_cache_checkpoint(*d->sources);
-        if (!d->view || !d->layout_key || !d->view->getDocument()->isRendered()) return CRE_OK;
+        if (!d->view || !d->layout_key || !d->view->getDocument()->isRendered() || d->view->getPageList()->length() > 65535) return CRE_OK;
         if (d->layout_cache.isNull()) d->layout_cache = cre_layout_stream(cre_mcu_layout_records(), d->layout_key, false);
         if (d->layout_cache.isNull()) return CRE_OK;
         if (!d->view->getDocument()->saveMcuCache(d->layout_cache, d->view->getPageList())
             || !cre_layout_commit(d->layout_cache)) return CRE_IO;
-        return CRE_OK;
+        d->view->getPageList()->trimMcuPages(d->current_page); return CRE_OK;
     });
     // 中文：工作副本失败后重新从源加载，已交付给宿主的像素仍保持不变。
     // English: Rebuild a failed working copy from source; previously delivered host pixels remain unchanged.
@@ -328,7 +328,8 @@ extern "C" int cre_document_prepare(cre_document *d, const cre_anchor *anchor, u
             out->anchor.chapter = d->chapter;
             auto path = UnicodeToUtf8(d->view->getBookmark().toString());
             if (path.length() >= static_cast<int>(sizeof(out->anchor.path))) return CRE_CONTENT;
-            std::strcpy(out->anchor.path, path.c_str()); d->current_page = out->page; return CRE_OK;
+            std::strcpy(out->anchor.path, path.c_str()); d->current_page = out->page;
+            d->view->getPageList()->trimMcuPages(d->current_page); return CRE_OK;
         });
         bool retry = !attempt && !d->layout_cache.isNull() && (result == CRE_IO || result == CRE_CONTENT);
         if (result != CRE_OK) discardLayout(*d);

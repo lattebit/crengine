@@ -158,8 +158,14 @@ extern const int gDOMVersionCurrent = DOM_VERSION_CURRENT;
 #define COMPRESS_PAGEMAP_DATA       true
 #define COMPRESS_STYLE_DATA         true
 
+#if CR_MCU
+// 中文：小页记录使用紧凑逻辑分配；物理写入仍由 16 KiB 缓存块合并。
+// English: Small page records use compact logical allocation; physical writes still coalesce into 16 KiB cache blocks.
+#define CACHE_FILE_SECTOR_SIZE 128
+#else
 //#define CACHE_FILE_SECTOR_SIZE 4096
 #define CACHE_FILE_SECTOR_SIZE 1024
+#endif
 #define CACHE_FILE_WRITE_BLOCK_PADDING 1
 
 /// set t 1 to log storage reads/writes
@@ -226,7 +232,7 @@ enum CacheFileBlockType {
     CBT_BLOB_DATA,
     CBT_FONT_DATA  //18
 #if CR_MCU
-    , CBT_MCU_GEOMETRY, CBT_MCU_CURSOR
+    , CBT_MCU_GEOMETRY, CBT_MCU_CURSOR, CBT_MCU_PAGE
 #endif
 };
 
@@ -577,6 +583,10 @@ struct CacheFileHeader : public SimpleCacheFileHeader
         _fsize = fsize;
     }
 };
+
+#if CR_MCU
+static_assert(sizeof(CacheFileHeader) <= CACHE_FILE_SECTOR_SIZE, "Cache header must fit the first logical sector");
+#endif
 
 /**
  * Cache file implementation.
@@ -1196,10 +1206,16 @@ bool CacheFile::write( lUInt16 type, lUInt16 dataIndex, const lUInt8 * buf, int 
 //                CRLog::error("paddingSize > 16384");
 //            }
 //            LASSERT(paddingSize <= 16384);
-            lUInt8 tmp[16384];//paddingSize];
-            memset(tmp, 0xFF, paddingSize < 16384 ? paddingSize : 16384);
+#if CR_MCU
+            // 中文：缓存填充不占用大块内部任务栈。/ English: Cache padding does not consume a large internal task stack.
+            lUInt8 tmp[512];
+#else
+            lUInt8 tmp[16384];
+#endif
+            const int capacity = sizeof(tmp);
+            memset(tmp, 0xFF, paddingSize < capacity ? paddingSize : capacity);
             do {
-                int blkSize = paddingSize < 16384 ? paddingSize : 16384;
+                int blkSize = paddingSize < capacity ? paddingSize : capacity;
                 _stream->Write(tmp, blkSize, &bytesWritten );
                 paddingSize -= blkSize;
             } while (paddingSize > 0);
@@ -5600,7 +5616,7 @@ bool ldomDocument::openMcuCache(LVStreamRef stream, CacheLoadingCallback *format
 }
 bool ldomDocument::saveMcuCache(LVStreamRef stream, LVRendPageList *pages)
 {
-    if (!_rendered || !pages || stream.isNull()) return false;
+    if (!_rendered || !pages || pages->length() > 65535 || stream.isNull()) return false;
     if (!_cacheFile) {
         auto cache = std::make_unique<CacheFile>(_DOMVersionRequested);
         if (!cache->create(stream)) return false;
@@ -5608,8 +5624,20 @@ bool ldomDocument::saveMcuCache(LVStreamRef stream, LVRendPageList *pages)
         _textStorage.setCache(_cacheFile); _elemStorage.setCache(_cacheFile);
         _rectStorage.setCache(_cacheFile); _styleStorage.setCache(_cacheFile); _blobCache.setCacheFile(_cacheFile);
     }
-    _pagesData.reset(); if (!pages->serialize(_pagesData)) return false;
-    return saveChanges();
+    // 中文：确定页不会变化；只追加新页，定位目录与续算游标独立更新。
+    // English: Confirmed pages are immutable; append new pages while updating positioning metadata and continuation separately.
+    for (int i = pages->mcuCachedPages(); i < pages->length(); ++i) {
+        cre_mcu_checkpoint(); SerialBuf page(0);
+        if (!pages->get(i)->serialize(page) || !_cacheFile->write(CBT_MCU_PAGE, lUInt16(i), page, true)) return false;
+    }
+    _pagesData.reset(); if (!pages->serializeMcuIndex(_pagesData) || !saveChanges()) return false;
+    pages->captureMcuIndex(this, [](void *context, unsigned index, SerialBuf &data) {
+        return static_cast<ldomDocument *>(context)->readMcuPage(index, data);
+    });
+    SerialBuf empty(0); _pagesData.swap(empty); return true;
+}
+bool ldomDocument::readMcuPage(unsigned index, SerialBuf &buffer) {
+    return _cacheFile && index < 65535 && _cacheFile->read(CBT_MCU_PAGE, lUInt16(index), buffer);
 }
 bool ldomDocument::saveMcuPageState(SerialBuf &geometry, SerialBuf &cursor)
 {
@@ -5626,7 +5654,6 @@ bool ldomDocument::continueMcuPages(int pages)
     if (!_mcu_page_context) return true;
     if (!_mcu_page_context->FinalizeTo(pages)) return false;
     _pagesData.reset();
-    _mcu_page_context->getPageList()->serialize(_pagesData);
     delete _mcu_page_context; _mcu_page_context = NULL;
     return true;
 }
@@ -5848,8 +5875,11 @@ bool ldomDocument::render( LVRendPageList * pages, LVDocViewCallback * callback,
         CRLog::info("rendering context is not changed - no render!");
         if ( was_just_rendered_from_cache && _pagesData.pos() ) {
             _pagesData.setPos(0);
-            pages->deserialize( _pagesData );
 #if CR_MCU
+            if (!pages->restoreMcuIndex(_pagesData, this, [](void *context, unsigned index, SerialBuf &data) {
+                return static_cast<ldomDocument *>(context)->readMcuPage(index, data);
+            })) throw CreMcuFailure{CRE_CONTENT};
+            SerialBuf empty(0); _pagesData.swap(empty);
             SerialBuf state(0, true);
             if (!_cacheFile->read(CBT_MCU_CURSOR, state) || state.size() < 1) throw CreMcuFailure{CRE_CONTENT};
             if (state.buf()[0]) {
@@ -5858,6 +5888,8 @@ bool ldomDocument::render( LVRendPageList * pages, LVDocViewCallback * callback,
                 SerialBuf fixed(geometry.buf(), geometry.size()), cursor(state.buf() + 1, state.size() - 1);
                 if (!restoreMcuPageState(fixed, cursor, pages)) throw CreMcuFailure{CRE_CONTENT};
             }
+#else
+            pages->deserialize(_pagesData);
 #endif
         }
         CRLog::info("%d rendered pages found", pages->length() );
@@ -18380,6 +18412,9 @@ bool ldomDocument::loadCacheFileContent(CacheLoadingCallback * formatCallback, L
         }
         pagebuf.swap( _pagesData );
         _pagesData.setPos( 0 );
+#if CR_MCU
+        if (!LVRendPageList::validateMcuIndex(_pagesData)) return false;
+#else
         LVRendPageList pages;
         pages.deserialize(_pagesData);
         if ( _pagesData.error() ) {
@@ -18387,6 +18422,7 @@ bool ldomDocument::loadCacheFileContent(CacheLoadingCallback * formatCallback, L
             return false;
         }
         CRLog::info("%d pages read from cache file", pages.length());
+#endif
         //_pagesData.setPos( 0 );
 
         if (progressCallback) progressCallback->OnLoadFileProgress(20);

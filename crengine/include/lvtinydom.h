@@ -2967,6 +2967,8 @@ public:
     bool openMcuCache(LVStreamRef stream, CacheLoadingCallback *formatCallback);
     /// 保存 DOM、几何和已确认页；宿主随后显式发布缓存根。/ Save DOM, geometry and confirmed pages; the host explicitly publishes the cache root afterward.
     bool saveMcuCache(LVStreamRef stream, LVRendPageList *pages);
+    /// 按页读取已校验的缓存记录。/ Read a verified cache record for one page.
+    bool readMcuPage(unsigned index, SerialBuf &buffer);
 #endif
     bool isBeingParsed() { return _parsing; }
     /// renders (formats) document in memory: returns true if re-rendering needed, false if not
