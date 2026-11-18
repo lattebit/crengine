@@ -34,6 +34,40 @@ int main(int argc, char **argv) {
     assert(cre_mcu_initialize(&cfg) == CRE_OK);
     cre_layout layout{480, 640, 24, 400, 12, 100, 2, 0, 0, {}, 12};
     std::strcpy(layout.font, argv[1]); std::vector<uint8_t> image(480 * 640 / 2);
+    for (const char *language : {"english", "chinese", "traditional"}) {
+        auto path = std::string(argv[2]) + "/headings-" + language + ".txt";
+        cre_document *document = nullptr; assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
+        cre_toc_entry entries[4]{}; uint32_t count = 0;
+        assert(cre_document_toc(document, 0, entries, 4, &count) == CRE_OK);
+        const char *first = !std::strcmp(language, "english") ? "Chapter 1 Start" : !std::strcmp(language, "chinese") ? "第一章 开始" : "第壹卷 開始";
+        const char *last = !std::strcmp(language, "english") ? "Chapter 2 End" : !std::strcmp(language, "chinese") ? "第二章 结束" : "第２節 結束";
+        if (count != 2 || std::strcmp(entries[0].title, first) || std::strcmp(entries[1].title, last))
+            std::fprintf(stderr, "TXT %s contents=%u first=%s last=%s\n", language, count, entries[0].title, entries[1].title);
+        assert(count == 2 && !std::strcmp(entries[0].title, first) && !std::strcmp(entries[1].title, last));
+        cre_page_state page{};
+        assert(cre_document_prepare(document, &entries[1].anchor, 0, image.data(), image.size(), &page) == CRE_OK);
+        char text[512]{}; assert(cre_document_text(document, text, sizeof(text)) == CRE_OK && std::strstr(text, last));
+        cre_document_close(document); assert(!platform.files);
+    }
+    {
+        auto path = std::string(argv[2]) + "/many-headings.txt";
+        cre_document *document = nullptr; assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
+        size_t reads = platform.reads;
+        cre_toc_entry entries[16]{}; uint32_t count = 0, total = 0;
+        do {
+            assert(cre_document_toc(document, total, entries, 16, &count) == CRE_OK);
+            for (uint32_t i = 0; i < count; ++i) {
+                auto expected = "Chapter " + std::to_string(total + i);
+                assert(entries[i].title == expected && entries[i].anchor.path[0]);
+            }
+            total += count;
+        } while (count);
+        assert(total == 2200);
+        assert(cre_document_toc(document, 1098, entries, 4, &count) == CRE_OK && count == 4);
+        assert(!std::strcmp(entries[0].title, "Chapter 1098") && !std::strcmp(entries[3].title, "Chapter 1101"));
+        assert(platform.reads == reads);
+        cre_document_close(document); assert(!platform.files);
+    }
     {
         std::vector<uint8_t> reference;
         for (const char *encoding : {"utf-8", "gbk", "utf-16", "utf-32"}) {

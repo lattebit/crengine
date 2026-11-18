@@ -1189,6 +1189,22 @@ int DetectHeadingLevelByText( const lString32 & str )
 {
     if ( str.empty() )
         return 0;
+#if CR_MCU
+    // 中文：识别简繁中文的编号章节；普通“第一天”等句子不作为目录。
+    // English: Recognize numbered simplified/traditional Chinese chapters without treating phrases such as "the first day" as headings.
+    if (str[0] == U'第') {
+        int i = 1;
+        for (; i < str.length() && i <= 18; ++i) {
+            bool number = false;
+            for (lChar32 digit : U"0123456789０１２３４５６７８９一二三四五六七八九十百千万萬零〇两兩壹贰貳叁參肆伍陆陸柒捌玖拾佰仟")
+                if (str[i] == digit) { number = true; break; }
+            if (!number) break;
+        }
+        if (i > 1 && i < str.length() && i <= 18) {
+            for (lChar32 unit : U"章回卷部节節") if (str[i] == unit) return 3;
+        }
+    }
+#endif
     if ( startsWithOneOf( str, heading_volume ) )
         return 1;
     if ( startsWithOneOf( str, heading_part ) )
@@ -1340,6 +1356,9 @@ private:
     int linesToSkip;
     bool lastParaWasTitle;
     bool inSubSection;
+#if CR_MCU
+    bool numberedHeadings = false;
+#endif
     int max_left_stats_pos;
     int max_left_second_stats_pos;
     int max_right_stats_pos;
@@ -1441,6 +1460,15 @@ public:
     /// checks text format options
     void detectFormatFlags()
     {
+#if CR_MCU
+        // 中文：书中已有编号章节时，短正文不能再靠字数猜成标题。
+        // English: Once numbered chapters are present, short body lines must not become headings solely because of their length.
+        for (int i = 0; i < length(); ++i) {
+            auto line = get(i)->text; line.trim();
+            int level = line.length() <= MAX_HEADING_CHARS ? DetectHeadingLevelByText(line) : 0;
+            if (level >= 1 && level <= 3) { numberedHeadings = true; break; }
+        }
+#endif
         //CRLog::debug("detectFormatFlags() enter");
         formatFlags = tftParaPerLine | tftEmptyLineDelimHeaders; // default format
         if ( length()<10 )
@@ -1809,6 +1837,10 @@ public:
             if ( singleLineFollowedByEmpty && !(formatFlags & tftEmptyLineDelimPara) )
                 isHeader = true;
         }
+#if CR_MCU
+        if (numberedHeadings && !singleChar && !get(startline)->isHeading())
+            isHeader = startline == endline && DetectHeadingLevelByText(str) > 0;
+#endif
         if ( str.length() > MAX_HEADING_CHARS )
             isHeader = false;
         if ( !str.empty() ) {

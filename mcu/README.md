@@ -58,6 +58,12 @@ EPUB indexes and bodies accept UTF-8 and UTF-16 XML with or without a BOM. UTF-1
 TXT 以固定 1 KiB 工作区识别 UTF-8 与 GBK；BOM 优先指定 Unicode 编码。无 BOM 时先验证完整 UTF-8，再接受有效 GBK，否则按 UTF-8 显示替代符。短文件、长 ASCII 前缀后的汉字和跨块字符都执行同一规则。UTF-8 无效标量替换为 U+FFFD，65536 字符长行不因位置回绕而丢失；这仍不等于有界 DOM 流式排版。
 TXT detection uses fixed 1 KiB workspace, giving Unicode BOMs priority, then checking complete UTF-8 before accepting valid GBK; otherwise it decodes UTF-8 with replacements. Short files, Chinese after long ASCII prefixes and split characters share these rules. Invalid UTF-8 scalars become U+FFFD and 65536-character lines do not disappear through position overflow. This does not yet provide bounded streaming DOM layout.
 
+TXT 目录识别简繁中文编号章节，包括中文数字和全角数字。有编号章节时，短正文不会仅因字数少就被误列为标题。
+TXT contents recognize numbered simplified/traditional Chinese chapters, including Chinese and full-width numerals. When numbered chapters are present, short body lines are not promoted to headings solely because of their length.
+
+非 EPUB 目录直接使用解析得到的结构锚点，不更新页码或触发正文排版；目录批次读取不产生字形文件读取。
+Non-EPUB contents use parsed structural anchors directly, without updating page numbers or triggering body layout. Reading contents batches does not read glyph data.
+
 `margin` controls the top and both sides; `bottom_margin` is independent, with zero reserving no extra space below the last complete line.
 
 JPEG/PNG dimensions are probed from streams. The optional `decode_image` callback returns contiguous grayscale bytes through the supplied budgeted allocator. The port emits target-sized rows without a full color bitmap; `cre_document_image` prepares a resource without advancing the body anchor.

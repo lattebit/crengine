@@ -26,6 +26,9 @@ struct cre_document {
     LVStreamRef stream;
     std::unique_ptr<LVDocView> view;
     uint32_t chapter = UINT32_MAX;
+    LVTocItem *next_toc = nullptr;
+    uint32_t next_toc_index = 0;
+    bool toc_started = false;
     bool font_registered = false;
     std::vector<cre_hit> hits;
     ~cre_document() {
@@ -74,6 +77,7 @@ void metadata(cre_document &d, CRPropRef props) {
 }
 int load(cre_document &d, uint32_t chapter) {
     if (d.view && d.chapter == chapter) return CRE_OK;
+    d.next_toc = nullptr; d.next_toc_index = 0; d.toc_started = false;
     d.view.reset(); d.chapter = UINT32_MAX;
     if (!d.font_registered) {
         if (!fontMan->RegisterExternalFont(-1, Utf8ToUnicode(d.layout.font), lString8("mcu-reading"), 400, 100, false))
@@ -294,16 +298,30 @@ extern "C" int cre_document_toc(cre_document *d, uint32_t first, cre_toc_entry *
                 }
             }
         } else if (d->view) {
-            // 中文：使用显式栈读取目录，避免递归深度随恶意输入增长。
-            // English: Walk contents with an explicit stack instead of input-dependent call-stack recursion.
-            LVArray<LVTocItem *> pending; pending.add(d->view->getToc()); uint32_t ordinal = 0;
-            while (pending.length() && *count < capacity) {
-                auto *item = pending.remove(pending.length() - 1);
-                if (item->getLevel() && ordinal++ >= first) {
-                    auto &entry = out[(*count)++]; entry = {}; entry.depth = item->getLevel();
-                    copy(entry.title, sizeof(entry.title), item->getName()); copy(entry.anchor.path, sizeof(entry.anchor.path), item->getXPointer().toString());
+            // 中文：目录只需要结构锚点；视图目录会更新页码并触发全文排版和字形读取。
+            // English: Contents need structural anchors only; view-level contents update page numbers and trigger full layout and glyph reads.
+            auto advance = [](LVTocItem *item) -> LVTocItem * {
+                if (item->getChildCount()) return item->getChild(0);
+                while (auto *parent = item->getParent()) {
+                    if (item->getIndex() + 1 < parent->getChildCount()) return parent->getChild(item->getIndex() + 1);
+                    item = parent;
                 }
-                for (int i = item->getChildCount() - 1; i >= 0; --i) pending.add(item->getChild(i));
+                return nullptr;
+            };
+            // 中文：连续批次保留游标；沿父节点迭代，无递归或目录大小相关的临时栈。
+            // English: Retain the cursor across consecutive batches, walking parent links without recursion or an outline-sized temporary stack.
+            if (!d->toc_started || first != d->next_toc_index) {
+                d->next_toc = advance(d->view->getDocument()->getToc());
+                d->next_toc_index = 0; d->toc_started = true;
+            }
+            while (d->next_toc && *count < capacity) {
+                cre_mcu_checkpoint();
+                auto *item = d->next_toc;
+                if (d->next_toc_index >= first) {
+                    auto &entry = out[(*count)++]; entry = {}; entry.depth = item->getLevel();
+                    copy(entry.title, sizeof(entry.title), item->getName()); copy(entry.anchor.path, sizeof(entry.anchor.path), item->getPath());
+                }
+                d->next_toc = advance(item); ++d->next_toc_index;
             }
         }
         return CRE_OK;
