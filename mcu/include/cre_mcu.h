@@ -29,6 +29,8 @@ typedef struct {
     uint8_t *pixels; ///< 分配器拥有的连续八位灰阶 / Allocator-owned contiguous grayscale bytes
     uint32_t width, height; ///< 实际解码尺寸 / Actual decoded dimensions
 } cre_mcu_bitmap;
+/// 顺序或定位读取解包后的资源；返回 CRE 错误码。/ Read an unpacked resource sequentially or by offset, returning a CRE status.
+typedef int (*cre_mcu_resource_read)(void *, uint64_t, void *, size_t);
 typedef struct {
     void *context; ///< 平台上下文 / Platform context
     void *(*allocate)(void *, size_t); ///< PSRAM 优先，返回自然对齐地址 / Prefer PSRAM and return naturally aligned storage
@@ -41,6 +43,7 @@ typedef struct {
     size_t memory_limit; ///< 引擎可跟踪分配的硬预算 / Hard budget for tracked engine allocations
     int (*decode_image)(void *, const uint8_t *, size_t, uint32_t, uint32_t,
                         const cre_mcu_image_memory *, cre_mcu_bitmap *); ///< 可选宿主 JPEG/PNG 解码，必须使用给定分配器 / Optional host JPEG/PNG decoding using the supplied allocator
+    int (*cache_font)(void *, const char *, uint64_t, cre_mcu_resource_read, void *, char *, size_t); ///< 可选流式字体落盘；CRE_BUSY 表示缓存不可用 / Optional streamed font extraction; CRE_BUSY means cache unavailable
 } cre_mcu_platform_t;
 typedef struct {
     size_t used, peak, limit; ///< 当前、峰值和预算字节 / Current, peak and budget bytes

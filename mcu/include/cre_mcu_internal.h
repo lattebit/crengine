@@ -17,6 +17,12 @@ void cre_mcu_reset_error();
 int cre_mcu_error();
 FT_Error cre_mcu_new_library(FT_Library *out);
 FT_Error cre_mcu_new_face(FT_Library library, const char *path, FT_Long index, FT_Face *out);
+/// 嵌入字体共用有界读取缓存，不保留整份文件。/ Embedded fonts share bounded reads without retaining the entire file.
+LVStreamRef cre_mcu_font_stream(LVStreamRef source);
+FT_Error cre_mcu_new_stream_face(FT_Library library, LVStreamRef source, FT_Long index, FT_Face *out);
+/// 按需提取字体，返回普通文件路径；无可用磁盘缓存时返回空路径。
+/// Extract a font on demand into a regular path; return an empty path when disk caching is unavailable.
+lString8 cre_mcu_cache_font(const char *name, LVStreamRef source);
 FT_Library cre_mcu_font_library();
 LVStreamRef cre_mcu_open_stream(const lChar32 *path, int mode);
 LVContainerRef cre_mcu_open_directory(const lChar32 *path);

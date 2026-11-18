@@ -2309,6 +2309,17 @@ public:
         return setupFace(index, size, fontFamily, monochrome, italicize, weight, face_size);
     }
 
+#if CR_MCU
+    // 中文：嵌入字体按需读取，同源不同字号共享缓存。/ English: Read embedded fonts on demand with a cache shared across sizes.
+    bool loadFromStream(LVStreamRef stream, int index, int size, css_font_family_t fontFamily,
+                        bool monochrome, bool italicize, int weight=-1, int face_size=-1) {
+        FONT_GUARD;
+        Clear();
+        FT_Error error = cre_mcu_new_stream_face(_library, stream, index, &_face);
+        if (error != FT_Err_Ok) return false;
+        return setupFace(index, size, fontFamily, monochrome, italicize, weight, face_size);
+    }
+#endif
     // Load font from file path
     bool loadFromFile( const char * fname, int index, int size, css_font_family_t fontFamily,
                                            bool monochrome, bool italicize, int weight=-1, int face_size=-1 ) {
@@ -6099,6 +6110,10 @@ struct LVFontFace {
     // registry O(fonts) rather than O(doc fragments × fonts).
     LVArray<int>       docFragmentIdxSet;
     LVByteArrayRef     buf;          // non-null for in-memory fonts
+#if CR_MCU
+    LVStreamRef       stream;       ///< 有界的嵌入字体共享流 / Bounded shared embedded-font stream
+    lString8          cache_path;   ///< 解包后复用普通字体路径 / Extracted path using ordinary font I/O
+#endif
     // Variable-font axis ranges; for static fonts min==max.
     bool  _has_wght; float _wght_min, _wght_max;
     bool  _has_opsz; float _opsz_min, _opsz_max;
@@ -8061,8 +8076,19 @@ public:
         font->setVariations(computed_variations);
 
         bool loaded;
+#if CR_MCU
+        if (!face.stream.isNull()) {
+            loaded = font->loadFromStream(face.stream, face.face_index, size,
+                                         face.css_family, isBitmapModeForSize(size), italicize, loadWeight, face_size);
+        } else
+#endif
         if (face.buf.isNull()) {
+#if CR_MCU
+            const lString8 &path = face.cache_path.empty() ? face.file_path : face.cache_path;
+            loaded = font->loadFromFile(path.c_str(), face.face_index, size,
+#else
             loaded = font->loadFromFile(face.file_path.c_str(), face.face_index, size,
+#endif
                                         face.css_family, isBitmapModeForSize(size),
                                         italicize, loadWeight, face_size);
         } else {
@@ -8274,9 +8300,15 @@ public:
             printf("CRE WARNING: document font '%s' ignored: file too big\n", LCSTR(name));
             return false;
         }
+#if CR_MCU
+        lString8 cache_path = cre_mcu_cache_font(name8.c_str(), stream);
+        if (cache_path.empty()) stream = cre_mcu_font_stream(stream);
+        else stream.Clear();
+#else
         LVByteArrayRef buf = stream->GetData();
         if (!buf)
             return false;
+#endif
 
         bool res = false;
         int index = 0;
@@ -8284,7 +8316,12 @@ public:
 
         // for all faces in file
         for ( ;; index++ ) {
+#if CR_MCU
+            FT_Error error = cache_path.empty() ? cre_mcu_new_stream_face(_library, stream, index, &face)
+                                               : cre_mcu_new_face(_library, cache_path.c_str(), index, &face);
+#else
             FT_Error error = FT_New_Memory_Face( _library, buf->get(), buf->length(), index, &face ); /* create face object */
+#endif
             if (error != FT_Err_Ok) {
                 ft_error_trace(__func__, "FT_New_Memory_Face", error);
                 break;
@@ -8329,7 +8366,12 @@ public:
             def.css_family  = fontFamily;
             def.typeface    = familyName;
             def.documentId  = documentId;
+#if CR_MCU
+            def.stream      = stream;
+            def.cache_path  = cache_path;
+#else
             def.buf         = buf;
+#endif
             inspectFTFace(face, def, resolvedWeight, resolvedWidth);
             #if (DEBUG_FONT_MAN==1)
                 if ( _log )
