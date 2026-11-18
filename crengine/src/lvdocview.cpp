@@ -4429,6 +4429,15 @@ void LVDocView::createDefaultDocument(lString32 title, lString32 message) {
 }
 
 /// load document from stream
+#ifdef CR_MCU
+void LVDocView::setSourcePath(const lString32 &path) {
+    lString32 directory = LVExtractPath(path);
+    m_doc_props->setString(DOC_PROP_FILE_PATH, directory);
+    m_doc_props->setString(DOC_PROP_FILE_NAME, LVExtractFilename(path));
+    m_doc_props->setString(DOC_PROP_CODE_BASE, directory);
+    m_container = LVOpenDirectory(directory.c_str());
+}
+#endif
 bool LVDocView::LoadDocument(LVStreamRef stream, bool metadataOnly) {
 
 

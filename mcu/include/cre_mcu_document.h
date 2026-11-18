@@ -32,6 +32,11 @@ typedef struct {
     cre_anchor anchor; ///< 目标位置 / Destination
     char title[192]; ///< 标题 / Title
 } cre_toc_entry;
+typedef struct {
+    int32_t x, y, width, height; ///< 页面内命中区域 / Hit area in page coordinates
+    uint32_t image; ///< 非零为图片 / Nonzero for an image
+    char href[768]; ///< 内部资源或链接 / Internal resource or link
+} cre_hit;
 /// 打开索引；正文在 prepare 时加载。/ Open an index; body loading starts at prepare.
 int cre_document_open(const char *path, const cre_layout *layout, cre_document **out);
 /// 关闭前必须停止全部调用；像素缓冲不由此接口释放。/ Stop all calls before close; this function does not release host pixels.
@@ -51,6 +56,8 @@ int cre_document_text(cre_document *document, char *out, size_t capacity);
 int cre_document_cover(cre_document *document, uint8_t *pixels, size_t capacity);
 /// 返回当前页点击位置的链接或图片路径。/ Return the link or image resource at a point on the current page.
 int cre_document_hit(cre_document *document, int32_t x, int32_t y, char *href, size_t capacity, uint32_t *image);
+/// 借用本次准备结果的命中区域，下一次引擎调用前必须复制。/ Borrow prepared hit areas; copy them before the next engine call.
+const cre_hit *cre_document_hits(cre_document *document, size_t *count);
 /// 将内部链接解析为稳定章节锚点。/ Resolve an internal link to a stable chapter anchor.
 int cre_document_resolve(cre_document *document, const char *href, cre_anchor *anchor);
 #ifdef __cplusplus

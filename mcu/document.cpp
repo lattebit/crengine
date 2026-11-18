@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <vector>
 
 struct cre_document {
     std::string path;
@@ -24,6 +25,7 @@ struct cre_document {
     std::unique_ptr<LVDocView> view;
     uint32_t chapter = UINT32_MAX;
     bool font_registered = false;
+    std::vector<cre_hit> hits;
     ~cre_document() {
         view.reset();
         if (font_registered) { fontMan->UnregisterDocumentFonts(-1); fontMan->gc(); }
@@ -78,6 +80,7 @@ int load(cre_document &d, uint32_t chapter) {
     auto view = std::make_unique<LVDocView>(8, true);
     view->setBackgroundColor(0xffffff); view->setTextColor(0);
     view->setDefaultFontFace(lString8("mcu-reading")); view->setStatusFontFace(lString8("mcu-reading"));
+    view->setSourcePath(Utf8ToUnicode(d.path.c_str()));
     view->setFontSize(d.layout.pixels); view->setPageHeaderInfo(0); view->setShowCover(false);
     view->setPageMargins(lvRect(d.layout.margin, d.layout.margin, d.layout.margin, d.layout.margin));
     view->setViewMode(DVM_PAGES, 1); view->Resize(d.layout.width, d.layout.height);
@@ -124,6 +127,34 @@ int render(cre_document &d, uint8_t *pixels, size_t capacity, bool cover) {
         for (uint32_t x = 0; x < l.width; x += 2) pixels[static_cast<size_t>(y) * l.width / 2 + x / 2] = (row[x] & 0xf0) | (row[x + 1] >> 4);
     }
     return CRE_OK;
+}
+void addHit(cre_document &d, lvRect rectangle, const lString32 &href, bool image) {
+    if (href.empty()) return;
+    auto start = rectangle.topLeft(), end = rectangle.bottomRight();
+    if (!d.view->docToWindowPoint(start, false, true) || !d.view->docToWindowPoint(end, true, true)) return;
+    int left = std::max(0, start.x), top = std::max(0, start.y);
+    int right = std::min(static_cast<int>(d.layout.width), end.x), bottom = std::min(static_cast<int>(d.layout.height), end.y);
+    if (right <= left || bottom <= top) return;
+    cre_hit hit{}; hit.x = left; hit.y = top; hit.width = right - left; hit.height = bottom - top; hit.image = image;
+    auto target = UnicodeToUtf8(href);
+    if (target.length() >= static_cast<int>(sizeof(hit.href))) throw CreMcuFailure{CRE_CONTENT};
+    std::strcpy(hit.href, target.c_str()); d.hits.push_back(hit);
+}
+void collectHits(cre_document &d) {
+    d.hits.clear(); ldomXRangeList links; d.view->getCurrentPageLinks(links);
+    for (int i = 0; i < links.length(); ++i) {
+        cre_mcu_checkpoint(); LVArray<lvRect> rectangles; links[i]->getSegmentRects(rectangles, true);
+        auto href = links[i]->getHRef();
+        for (int n = 0; n < rectangles.length(); ++n) addHit(d, rectangles[n], href, false);
+    }
+    auto range = d.view->getPageDocumentRange();
+    if (!range.isNull()) {
+        LVArray<ldomNode *> images; range->getRangeText(U'\n', 0, &images);
+        for (int i = 0; i < images.length(); ++i) {
+            lvRect rectangle; ldomXPointer pointer(images[i], 0);
+            if (pointer.getRectEx(rectangle)) addHit(d, rectangle, images[i]->getAttributeValue("src"), true);
+        }
+    }
 }
 }
 extern "C" int cre_document_open(const char *path, const cre_layout *layout, cre_document **out) {
@@ -181,13 +212,14 @@ extern "C" int cre_document_prepare(cre_document *d, const cre_anchor *anchor, u
             }
         } else if (page >= static_cast<uint32_t>(d->view->getPageCount()) || !d->view->goToPage(page)) return CRE_INVALID;
         result = render(*d, pixels, capacity, false); if (result != CRE_OK) return result;
+        collectHits(*d);
         *out = {}; out->page = d->view->getCurPage(); out->pages = d->view->getPageCount(); out->complete = 1;
         out->anchor.chapter = d->chapter;
         auto path = UnicodeToUtf8(d->view->getBookmark().toString());
         if (path.length() >= static_cast<int>(sizeof(out->anchor.path))) return CRE_CONTENT;
         std::strcpy(out->anchor.path, path.c_str()); return CRE_OK;
     });
-    if (result != CRE_OK) { d->view.reset(); d->chapter = UINT32_MAX; fontMan->gc(); }
+    if (result != CRE_OK) { d->view.reset(); d->chapter = UINT32_MAX; d->hits.clear(); fontMan->gc(); }
     return result;
 }
 extern "C" int cre_document_toc(cre_document *d, uint32_t first, cre_toc_entry *out, uint32_t capacity, uint32_t *count) {
@@ -233,12 +265,17 @@ extern "C" int cre_document_hit(cre_document *d, int32_t x, int32_t y, char *hre
     if (!d || !d->view || !href || !capacity || !image || x < 0 || y < 0 || static_cast<uint32_t>(x) >= d->layout.width || static_cast<uint32_t>(y) >= d->layout.height) return CRE_INVALID;
     *href = 0; *image = 0;
     return boundary([&]() -> int {
-        auto pointer = d->view->getNodeByPoint(lvPoint(x, y), true);
-        if (pointer.isNull()) return CRE_OK;
-        if (pointer.isImage()) { *image = 1; copy(href, capacity, pointer.getNode()->getAttributeValue("src")); }
-        else copy(href, capacity, pointer.getHRef());
+        for (auto i = d->hits.rbegin(); i != d->hits.rend(); ++i) {
+            if (x < i->x || y < i->y || x >= i->x + i->width || y >= i->y + i->height) continue;
+            if (std::strlen(i->href) >= capacity) return CRE_INVALID;
+            std::strcpy(href, i->href); *image = i->image; break;
+        }
         return CRE_OK;
     });
+}
+extern "C" const cre_hit *cre_document_hits(cre_document *d, size_t *count) {
+    if (!d || !count) return nullptr;
+    *count = d->hits.size(); return d->hits.data();
 }
 extern "C" int cre_document_resolve(cre_document *d, const char *href, cre_anchor *anchor) {
     if (!d || !href || !anchor) return CRE_INVALID;

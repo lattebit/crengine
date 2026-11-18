@@ -46,6 +46,12 @@ int main(int argc, char **argv) {
             assert(cre_document_resolve(document, "OEBPS/b.xhtml#note", &link) == CRE_OK);
             assert(cre_document_prepare(document, &link, 0, image.data(), image.size(), &state) == CRE_OK);
             assert(state.page == state.pages - 1);
+            size_t count_hits = 0, reads = platform.reads;
+            auto hits = cre_document_hits(document, &count_hits); assert(hits && count_hits);
+            char href[768]; uint32_t is_image = 0;
+            assert(cre_document_hit(document, hits[0].x + hits[0].width / 2, hits[0].y + hits[0].height / 2,
+                                    href, sizeof(href), &is_image) == CRE_OK);
+            assert(!std::strcmp(href, hits[0].href) && !is_image && platform.reads == reads);
         }
         cre_document_close(document); assert(!platform.files);
     }

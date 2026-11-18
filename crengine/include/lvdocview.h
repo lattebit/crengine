@@ -958,6 +958,10 @@ public:
     /// 中文：借用索引直至视图关闭；负章节保持完整导入，用于基准对照。
     /// English: Borrow an index until the view closes; negative chapter retains full import for reference comparisons.
     void setEpubIndex(EpubIndex *index, int chapter) { m_epubIndex = index; m_epubChapter = chapter; }
+#ifdef CR_MCU
+    /// 复用已打开流时设置相对资源基址，不重读源文件。/ Set the resource base for a reused stream without reopening its source.
+    void setSourcePath(const lString32 &path);
+#endif
     /// load document from file
     bool LoadDocument( const lChar32 * fname, bool metadataOnly = false );
     /// load document from stream
