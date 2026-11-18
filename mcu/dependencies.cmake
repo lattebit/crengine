@@ -13,6 +13,11 @@ add_library(cre_freetype STATIC
 target_include_directories(cre_freetype PUBLIC "${CRE_DEPS}/freetype/include" PRIVATE "${CRE_PORTS}")
 target_compile_definitions(cre_freetype PRIVATE FT2_BUILD_LIBRARY
     FT_CONFIG_OPTIONS_H="cre_ftoptions.h" FT_CONFIG_MODULES_H="cre_ftmodule.h")
+# 中文：灰阶栅格器仅在同步调用期间借用栈池；GCC 15 的逃逸提示保留为警告。
+# English: The gray rasterizer borrows its stack pool only during a synchronous call; retain GCC 15's escape diagnostic as a warning.
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+    set_source_files_properties("${CRE_DEPS}/freetype/src/smooth/smooth.c" PROPERTIES COMPILE_OPTIONS "-Wno-error=dangling-pointer")
+endif()
 
 add_library(cre_harfbuzz STATIC "${CRE_DEPS}/harfbuzz/src/harfbuzz.cc")
 target_include_directories(cre_harfbuzz PUBLIC "${CRE_DEPS}/harfbuzz/src")
