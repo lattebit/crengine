@@ -54,6 +54,11 @@ add_library(cre_xxhash STATIC "${CRE_DEPS}/xxhash/xxhash.c")
 target_include_directories(cre_xxhash PUBLIC "${CRE_DEPS}/xxhash")
 add_library(cre_md4c STATIC "${CRE_DEPS}/md4c/src/md4c.c")
 target_include_directories(cre_md4c PUBLIC "${CRE_DEPS}/md4c/src")
+# 中文：md_is_link_label 成功路径总会写入起始行；保留 GCC 15 的保守分析提示。
+# English: Successful md_is_link_label paths always set the starting line; retain GCC 15's conservative diagnostic.
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(cre_md4c PRIVATE -Wno-error=maybe-uninitialized)
+endif()
 foreach(target cre_freetype cre_harfbuzz cre_fribidi cre_unibreak cre_utf8proc cre_zlib cre_xxhash cre_md4c)
     target_compile_options(${target} PRIVATE -ffunction-sections -fdata-sections)
     set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)

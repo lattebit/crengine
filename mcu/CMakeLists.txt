@@ -23,6 +23,11 @@ set(CRE_MCU_SOURCES
 )
 list(TRANSFORM CRE_MCU_SOURCES PREPEND "${CRE_ROOT}/crengine/src/")
 list(TRANSFORM CRE_MCU_SOURCES APPEND ".cpp")
+# 中文：保留上游混合缩进及聚合零初始化的诊断，不让 IDF 全局 Werror 拒绝原始源码。
+# English: Retain diagnostics for upstream indentation and zero-filled aggregates without IDF's global Werror rejecting vendor code.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set_source_files_properties(${CRE_MCU_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wno-error=misleading-indentation;-Wno-error=missing-field-initializers")
+endif()
 configure_file(crsetup.h.in crsetup.h COPYONLY)
 file(READ "${CRE_ROOT}/cr3gui/data/html5.css" CRE_HTML_CSS)
 file(READ "${CRE_ROOT}/cr3gui/data/epub.css" CRE_EPUB_CSS)
