@@ -538,7 +538,7 @@ static const lChar32 __cp850[128] = {
 
 
 /// add other encodings here
-static struct {
+static const struct {
     const char * name;
     const lChar32 * table;
     int id;
@@ -1406,7 +1406,7 @@ static unsigned char *cp1251_page_uni2charset[256] = {
 };
 
 /// add other encodings here
-static struct {
+static const struct {
     const char * name;
     unsigned char ** table;
 } _uni2byte_enc_table[] = {

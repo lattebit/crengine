@@ -1157,7 +1157,7 @@ struct standard_color_t
     lUInt32 color;
 };
 
-standard_color_t standard_color_table[] = {
+static const standard_color_t standard_color_table[] = {
     {"aliceblue",0xf0f8ff},
     {"antiquewhite",0xfaebd7},
     {"aqua",0x00ffff},

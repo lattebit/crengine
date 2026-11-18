@@ -126,7 +126,7 @@ struct ns_def_t {
 #undef  XS_TAG2D
 #undef  XS_END_TAGS
 #define XS_BEGIN_TAGS \
-        static elem_def_t fb2_elem_table [] =  {
+        static const elem_def_t fb2_elem_table [] =  {
 #define XS_TAG1(itm) \
         { el_ ## itm, #itm, {false, false, css_d_block, css_ws_inherit} },
 #define XS_TAG2(itm, name) \
@@ -154,7 +154,7 @@ struct ns_def_t {
 #undef  XS_ATTR2
 #undef  XS_END_ATTRS
 #define XS_BEGIN_ATTRS \
-        static attr_def_t fb2_attr_table [] = {
+        static const attr_def_t fb2_attr_table [] = {
 #define XS_ATTR(itm) \
         { attr_ ## itm, #itm },
 #define XS_ATTR2(itm, name) \
@@ -167,7 +167,7 @@ struct ns_def_t {
 #undef  XS_NS
 #undef  XS_END_NS
 #define XS_BEGIN_NS \
-        static ns_def_t fb2_ns_table [] = {
+        static const ns_def_t fb2_ns_table [] = {
 #define XS_NS(itm) \
         { ns_ ## itm, #itm },
 #define XS_END_NS \
