@@ -74,6 +74,9 @@ The build excludes system font discovery, mmap, signal handling, color page back
 FreeType 可变字体初始化失败时，构建目录中的 `ttgxvar_mcu.c` 修正空 `mmvar` 的清理；配置阶段校验唯一修改位置。预览同时返回按 `wght` 标签识别的字重轴能力，不把 Literata 的 `opsz` 当成字重。
 The build applies a guarded `mmvar` cleanup fix to generated `ttgxvar_mcu.c`, checking the unique source anchor. Preview also reports weight-axis support by the `wght` tag rather than mistaking Literata’s `opsz` axis for weight.
 
+静态字体缺少更细字重时使用最接近的可用字形，不用负向描边强行减细，避免宋体细横画断裂。较粗字重仍可合成；可变字体通过真实 `wght` 轴选择轮廓。
+Static fonts use the nearest available design when a lighter weight is absent, without eroding thin serif strokes through negative outline synthesis. Heavier weights may still be synthesized; variable fonts select actual outlines through their `wght` axis.
+
 Port copies retain their upstream licenses. The FreeType hash port fixes allocation-failure cleanup; utf8proc bridges its public `int *` state to a local `utf8proc_int32_t` on S31. Regenerate FriBidi tables with `python3 mcu/generate_fribidi.py` after upgrading its pinned sources. Upstream user-agent CSS is embedded at configuration time.
 
 ## 可复跑测试 / Reproducible tests

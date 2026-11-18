@@ -8029,8 +8029,14 @@ public:
         } else {
             loadWeight = face.getStaticWeight();
         #ifdef USE_FT_EMBOLDEN
+        #if CR_MCU
+            // 中文：静态字体缺少细体时使用原字重，避免负向描边侵蚀宋体细横画；wght 轴仍使用真实轮廓。
+            // English: Keep the available static weight instead of eroding thin serif strokes; wght axes still use actual outlines.
+            needsSynthWeight = weight - loadWeight >= 25;
+        #else
             // FT_Outline_Embolden supports negative strength, so we can thin as well as embolden.
             needsSynthWeight = myabs(weight - loadWeight) >= 25;
+        #endif
         #else
             // LVFontBoldTransform can only embolden (hShift is always positive).
             needsSynthWeight = weight - loadWeight >= 200;

@@ -24,6 +24,10 @@ int main(int argc, char **argv) {
     assert(ink && paper); reference = pixels;
     assert(cre_mcu_font_preview(argv[1], "Reading 123 ABC", 32, 400, pixels.data(), 528, 116, &missing, &weight_axis) == CRE_OK);
     assert(pixels == reference);
+    // 中文：静态字形没有细体时保留原笔画；真正的 wght 轴仍能选择细体。
+    // English: Keep static outlines when no light face exists; real wght axes still select lighter designs.
+    assert(cre_mcu_font_preview(argv[1], "Reading 123 ABC", 32, 300, pixels.data(), 528, 116, &missing, &weight_axis) == CRE_OK);
+    if (!weight_axis) assert(pixels == reference);
     assert(cre_mcu_font_preview(argv[1], "\xf4\x8f\xbf\xbf", 32, 400, pixels.data(), 528, 116, &missing, &weight_axis) == CRE_OK);
     assert(missing);
     p.cancel = true;
