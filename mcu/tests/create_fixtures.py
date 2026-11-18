@@ -3,6 +3,8 @@
 from pathlib import Path
 import sys
 import zipfile
+import struct
+import zlib
 
 out = Path(sys.argv[1])
 out.mkdir(parents=True, exist_ok=True)
@@ -23,3 +25,11 @@ with zipfile.ZipFile(out / "fixture.epub", "w", compression=zipfile.ZIP_DEFLATED
     book.writestr("OEBPS/a.xhtml", html)
     book.writestr("OEBPS/b.xhtml", html.replace("Layout fixture", "Second chapter"))
     book.writestr("OEBPS/nav.xhtml", '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="a.xhtml">First</a></li><li><a href="b.xhtml">Second</a></li></ol></nav></body></html>')
+
+# 灰阶图片用于验证相对资源与命中区域。/ Grayscale fixture verifies relative resources and hit areas.
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+rows = (b"\0" + bytes([0] * 16 + [160] * 16)) * 24
+png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 24, 8, 0, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+(out / "image.png").write_bytes(png)
+(out / "image.html").write_text('<html><body><p><img src="image.png" width="128" height="96"/></p></body></html>')

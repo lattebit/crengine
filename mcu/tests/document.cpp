@@ -6,11 +6,16 @@
 #include "platform.h"
 #include "cre_mcu_document.h"
 #include <cstring>
+#include <algorithm>
 #include <string>
 #include <vector>
+static int decodeImage(void *, const uint8_t *, size_t, uint32_t width, uint32_t height, const cre_mcu_image_memory *memory, cre_mcu_bitmap *out) {
+    out->pixels = static_cast<uint8_t *>(memory->allocate(size_t(width) * height)); if (!out->pixels) return CRE_MEMORY;
+    out->width = width; out->height = height; std::memset(out->pixels, 64, size_t(width) * height); return CRE_OK;
+}
 int main(int argc, char **argv) {
     assert(argc == 3);
-    Platform platform; auto cfg = config(platform);
+    Platform platform; auto cfg = config(platform); cfg.decode_image = decodeImage;
     assert(cre_mcu_initialize(&cfg) == CRE_OK);
     cre_layout layout{480, 640, 24, 400, 12, 100, 2, 0, 0, {}};
     std::strcpy(layout.font, argv[1]); std::vector<uint8_t> image(480 * 640 / 2);
@@ -53,6 +58,16 @@ int main(int argc, char **argv) {
                                     href, sizeof(href), &is_image) == CRE_OK);
             assert(!std::strcmp(href, hits[0].href) && !is_image && platform.reads == reads);
         }
+        cre_document_close(document); assert(!platform.files);
+    }
+    {
+        cre_document *document = nullptr; auto path = std::string(argv[2]) + "/image.html";
+        assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
+        cre_anchor anchor{}; cre_page_state state{};
+        assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
+        size_t count = 0; auto hits = cre_document_hits(document, &count); assert(count && hits[0].image && *hits[0].href);
+        assert(cre_document_image(document, hits[0].href, image.data(), image.size()) == CRE_OK);
+        assert(std::count(image.begin(), image.end(), uint8_t(0x44)) > 10000);
         cre_document_close(document); assert(!platform.files);
     }
     for (const char *extension : {"epub", "txt", "html", "fb2", "md", "rtf"}) {

@@ -149,10 +149,10 @@ void collectHits(cre_document &d) {
     }
     auto range = d.view->getPageDocumentRange();
     if (!range.isNull()) {
-        LVArray<ldomNode *> images; range->getRangeText(U'\n', 0, &images);
+        LVArray<ldomNode *> images; range->getRangeText(U'\n', 0xfffc, &images);
         for (int i = 0; i < images.length(); ++i) {
             lvRect rectangle; ldomXPointer pointer(images[i], 0);
-            if (pointer.getRectEx(rectangle)) addHit(d, rectangle, images[i]->getAttributeValue("src"), true);
+            if (pointer.getRectEx(rectangle)) addHit(d, rectangle, images[i]->getObjectImageRefName(), true);
         }
     }
 }
