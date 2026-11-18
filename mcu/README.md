@@ -113,6 +113,9 @@ Fixtures cover six formats, meaningful grayscale content, chapter-versus-full EP
 中文禁则测试检查真实字符坐标，覆盖十三种行宽下的行首行尾标点、组合音符、成对破折号和省略号及不可断空格。嵌入字体测试对照普通字体的多字号像素，并验证分块读取、共享读取缓存和失败清理。
 Typography tests inspect real character positions across thirteen widths for opening/closing punctuation, combining marks, paired dashes/ellipses and nonbreaking spaces. Embedded-font tests compare ordinary-font pixels at multiple sizes and verify chunked reads, shared read caching and failure cleanup.
 
+EPUB 资源表和阅读顺序各最多 32768 项，解析时在建立下一节点前拒绝超限输入。边界测试同时检查上限、超限清理与随后重开。这是条目数限制，不代表上限规模在 MCU 内存中一定可用。
+EPUB manifests and spines admit at most 32768 entries each, rejecting excess input before creating the next node. Boundary tests cover the limit, rejected-document cleanup and reopening. This entry-count limit does not guarantee that a document at the limit fits MCU memory.
+
 Linux sanitizer 构建额外传入以下三个选项，然后运行相同 CTest：
 For Linux sanitizer builds, add these options and run the same CTest suite:
 

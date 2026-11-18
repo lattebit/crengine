@@ -10,6 +10,29 @@
 
 #if CR_MCU
 #include "cre_mcu_internal.h"
+// 中文：在生成 OPF 节点前检查目录上限，避免先建立超限 DOM 再拒绝。
+// English: Check package limits before creating nodes instead of rejecting an oversized DOM afterward.
+class McuPackageWriter : public ldomDocumentWriter {
+    unsigned items = 0, references = 0;
+public:
+    explicit McuPackageWriter(ldomDocument *document) : ldomDocumentWriter(document) {}
+    ldomNode *OnTagOpen(const lChar32 *nsname, const lChar32 *tagname) override {
+        cre_mcu_checkpoint();
+        lString32 tag(tagname);
+        const lString32 &parent = _document->getElementName(getCurrentNodeId());
+        if ((parent == U"manifest" && tag == U"item" && ++items > 32768)
+            || (parent == U"spine" && tag == U"itemref" && ++references > 32768))
+            throw CreMcuFailure{CRE_CONTENT};
+        return ldomDocumentWriter::OnTagOpen(nsname, tagname);
+    }
+};
+static ldomDocument *mcuParsePackage(LVStreamRef stream) {
+    auto document = std::make_unique<ldomDocument>();
+    document->setDocFlags(0);
+    McuPackageWriter writer(document.get());
+    auto parser = std::make_unique<LVXMLParser>(stream, &writer);
+    return parser->CheckFormat() && parser->Parse() ? document.release() : nullptr;
+}
 // 中文：语言用于字体策略；解析实际命名空间，忽略同名扩展元素并保留首项为空的语义。
 // English: Language drives font policy; resolve namespaces, ignore extension elements and retain an empty first value.
 static lString32 mcuPrimaryLanguage(ldomDocument *doc) {
@@ -1194,7 +1217,11 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
     // Read OPF file
     {
         CRLog::debug("Parsing opf");
+#if CR_MCU
+        std::unique_ptr<ldomDocument> ownedDoc(mcuParsePackage(content_stream));
+#else
         std::unique_ptr<ldomDocument> ownedDoc(LVParseXMLStream(content_stream));
+#endif
         ldomDocument *doc = ownedDoc.get();
         if ( !doc )
             return false;
