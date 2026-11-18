@@ -16,6 +16,9 @@
 #define __LV_FNT_MAN_H_INCLUDED__
 
 #include "crsetup.h"
+#if CR_MCU
+#include "cre_mcu_memory.h"
+#endif
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -155,7 +158,13 @@ struct LVFontGlyphCacheItem
     static LVFontGlyphCacheItem * newItem( LVFontLocalGlyphCache * local_cache, lChar32 ch, int w, int h, int pitch = 0, lUInt8 pixfmt = 1 )
     {
         if (!pitch) pitch = w * pixfmt;
-        LVFontGlyphCacheItem * item = (LVFontGlyphCacheItem *)malloc( offsetof(LVFontGlyphCacheItem, bmp)
+        LVFontGlyphCacheItem * item = (LVFontGlyphCacheItem *)
+#if CR_MCU
+            cre_mcu_allocate(
+#else
+            malloc(
+#endif
+            offsetof(LVFontGlyphCacheItem, bmp)
                                                                         + (pitch * h) );
 	if (item) {
 	    item->data.ch = ch;
@@ -178,7 +187,13 @@ struct LVFontGlyphCacheItem
     static LVFontGlyphCacheItem *newItem(LVFontLocalGlyphCache* local_cache, lUInt32 glyph_index, int w, int h, int pitch = 0, lUInt8 pixfmt = 1)
     {
         if (!pitch) pitch = w * pixfmt;
-        LVFontGlyphCacheItem * item = (LVFontGlyphCacheItem *)malloc( offsetof(LVFontGlyphCacheItem, bmp)
+        LVFontGlyphCacheItem * item = (LVFontGlyphCacheItem *)
+#if CR_MCU
+            cre_mcu_allocate(
+#else
+            malloc(
+#endif
+            offsetof(LVFontGlyphCacheItem, bmp)
                                                                         + (pitch * h) );
         if (item) {
             item->data.gindex = glyph_index;
@@ -201,7 +216,11 @@ struct LVFontGlyphCacheItem
     static void freeItem( LVFontGlyphCacheItem * item )
     {
         if (item)
+#if CR_MCU
+            cre_mcu_release(item);
+#else
             free( item );
+#endif
     }
 };
 

@@ -4,6 +4,7 @@
  * English: Real font backend regression for pixels, ownership, cancellation and allocation failures.
  */
 #include "cre_mcu.h"
+#include "lvfntman.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,7 @@ int main(int argc, char **argv) {
     Platform p; auto c = config(p);
     std::vector<uint8_t> pixels(528 * 116 / 2, 0xaa), reference;
     assert(cre_mcu_initialize(&c) == CRE_OK);
+    assert(!std::strcmp(hb_language_to_string(TextLangMan::getTextLangCfg(lString32("en"))->getHBLanguage()), "en"));
     uint32_t missing = 0, weight_axis = 0;
     assert(cre_mcu_font_preview(argv[1], "Reading 123 ABC", 32, 400, pixels.data(), 528, 116, &missing, &weight_axis) == CRE_OK);
     assert(!missing); assert(p.files == 0);
@@ -36,19 +38,33 @@ int main(int argc, char **argv) {
     assert(cre_mcu_font_preview(argv[1], "read failure", 32, 400, pixels.data(), 528, 116, &missing, &weight_axis) == CRE_IO);
     p.fail_read = false; assert(!p.files);
     cre_mcu_stats_t stats{}; cre_mcu_statistics(&stats); assert(stats.peak <= c.memory_limit);
+    size_t preview_peak = stats.peak;
     cre_mcu_shutdown(); assert(!p.live && !p.files);
     // 中文：每个分配点单独失败，必须可关闭并重新初始化。
     // English: Fail each allocation independently; shutdown and reinitialization must remain safe.
     Platform baseline; auto bc = config(baseline); assert(cre_mcu_initialize(&bc) == CRE_OK);
+    assert(!std::strcmp(hb_language_to_string(TextLangMan::getTextLangCfg(lString32("en"))->getHBLanguage()), "en"));
     assert(cre_mcu_font_preview(argv[1], "Allocation cleanup", 32, 400, pixels.data(), 528, 116, &missing, &weight_axis) == CRE_OK);
+    reference = pixels;
     size_t count = baseline.allocations; cre_mcu_shutdown(); assert(!baseline.live && !baseline.files);
     std::fprintf(stderr, "allocation points=%zu\n", count);
     for (size_t fail = 0; fail < count; ++fail) {
         Platform fault; fault.fail_at = fail; auto fc = config(fault);
         int result = cre_mcu_initialize(&fc);
         if (result == CRE_OK) result = cre_mcu_font_preview(argv[1], "Allocation cleanup", 32, 400, pixels.data(), 528, 116, &missing, &weight_axis);
-        (void)result; cre_mcu_shutdown();
+        assert(result == CRE_OK || result == CRE_MEMORY);
+        // 中文：可选缓存失败可以成功，但不得发布缺字或部分绘制的页面。
+        // English: Optional cache failures may succeed, but must never publish missing or partially drawn glyphs.
+        if (result == CRE_OK) assert(pixels == reference && !missing);
+        cre_mcu_shutdown();
+        cre_mcu_statistics(&stats); assert(!stats.used && stats.peak <= fc.memory_limit);
         if (fault.live || fault.files) { std::fprintf(stderr, "failure=%zu live=%zu files=%zu\n", fail, fault.live, fault.files); return 1; }
     }
-    std::printf("font pixels, missing glyphs, cancellation, I/O and %zu allocation failures passed; peak=%zu\n", count, stats.peak);
+    Platform limited; auto lc = config(limited); lc.memory_limit = 65536;
+    int result = cre_mcu_initialize(&lc);
+    if (result == CRE_OK) result = cre_mcu_font_preview(argv[1], "Budget limit", 32, 400, pixels.data(), 528, 116, &missing, &weight_axis);
+    assert(result == CRE_MEMORY);
+    cre_mcu_shutdown(); assert(!limited.live && !limited.files);
+    cre_mcu_statistics(&stats); assert(!stats.used && stats.peak <= lc.memory_limit);
+    std::printf("font pixels, missing glyphs, cancellation, I/O and %zu allocation failures passed; peak=%zu\n", count, preview_peak);
 }

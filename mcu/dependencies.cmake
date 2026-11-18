@@ -33,8 +33,22 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREAT
     set_source_files_properties("${CRE_DEPS}/freetype/src/smooth/smooth.c" PROPERTIES COMPILE_OPTIONS "-Wno-error=dangling-pointer")
 endif()
 
+# 中文：关闭服务会释放语言池，默认语言句柄不能跨关闭保留。
+# English: Service shutdown frees the interned language pool, so the default handle must not survive shutdown.
+file(READ "${CRE_DEPS}/harfbuzz/src/hb-common.cc" CRE_HB_COMMON)
+set(CRE_HB_ANCHOR "static hb_atomic_ptr_t <hb_language_t> default_language;")
+string(REGEX MATCHALL "static hb_atomic_ptr_t <hb_language_t> default_language" CRE_HB_MATCHES "${CRE_HB_COMMON}")
+list(LENGTH CRE_HB_MATCHES CRE_HB_COUNT)
+if(NOT CRE_HB_COUNT EQUAL 1)
+    message(FATAL_ERROR "Review HarfBuzz default-language lifetime before updating its source")
+endif()
+string(REPLACE "${CRE_HB_ANCHOR}" "hb_atomic_ptr_t <hb_language_t> default_language;" CRE_HB_COMMON "${CRE_HB_COMMON}")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/hb-common_mcu.cc" CONTENT "${CRE_HB_COMMON}")
+file(READ "${CRE_DEPS}/harfbuzz/src/harfbuzz.cc" CRE_HB_SOURCE)
+string(REPLACE "#include \"hb-common.cc\"" "#include \"${CMAKE_CURRENT_BINARY_DIR}/hb-common_mcu.cc\"" CRE_HB_SOURCE "${CRE_HB_SOURCE}")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/harfbuzz_mcu.cc" CONTENT "${CRE_HB_SOURCE}")
 add_library(cre_harfbuzz STATIC "${CRE_PORTS}/harfbuzz.cc")
-target_include_directories(cre_harfbuzz PUBLIC "${CRE_DEPS}/harfbuzz/src")
+target_include_directories(cre_harfbuzz PUBLIC "${CRE_DEPS}/harfbuzz/src" PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(cre_harfbuzz PRIVATE HAVE_FREETYPE HB_NO_MT HB_NO_MMAP
     HB_NO_ATEXIT HB_NO_SUBSET HB_NO_PAINT HB_NO_COLOR)
 target_compile_features(cre_harfbuzz PRIVATE cxx_std_17)

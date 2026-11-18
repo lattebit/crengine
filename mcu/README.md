@@ -32,10 +32,10 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 - 像素缓冲由调用者分配和管理：白色为 15，左像素在高半字节。上游 `LVGrayDrawBuf` 的 4/8 位灰阶内部仍为一字节一像素，端口使用可释放的灰阶工作区再打包。不得把半字节输出缓冲直接传给该上游对象。
 - `cre_document_toc`、`resolve`、`prepare` 使用章节和内容路径，不使用全书页号作为持久进度。宿主借用像素期间必须保证缓冲不被重新使用。`margin` 控制左右和顶部，`bottom_margin` 独立控制底部；零表示不预留额外页底空间。
 - 关闭顺序为文档、字体后端、平台上下文。取消检查会抛出内部异常，不能从平台的 C 回调抛出异常。
-- 当前预算统计覆盖 FreeType、共享字体源和灰阶临时缓冲。核心 DOM、C++ 对象及部分依赖分配尚未统一纳入该统计；宿主不能把此统计当作整个引擎的内存峰值或完整硬预算。
+- 当前预算统计覆盖 FreeType、HarfBuzz、字形位图、度量缓存、共享字体源和灰阶临时缓冲。度量缓存分配失败可直接使用已计算的值；字形或整形分配失败不发布半成品像素。关闭最后一个字体后显式释放 HarfBuzz 全局缓存，支持重开和逐分配故障恢复。核心 DOM、C++ 对象及部分依赖分配尚未统一纳入该统计；宿主不能把此统计当作整个引擎的内存峰值或完整硬预算。
 - JPEG/PNG 仅做流式尺寸探测，实际像素由 `decode_image` 平台回调使用给定预算分配器生成。回调返回连续八位灰阶，端口按目标尺寸逐行交给绘图层；不需要完整彩色位图。`cre_document_image` 可准备文档内图片，保持正文位置。
 
-`cre_mcu_initialize` starts fonts; previews do not create a document. Font sources share four 4 KiB blocks per path and close at their final reference. `cre_document_open` admits one active document. EPUB indexes survive chapter changes without retaining chapter DOM nodes. `prepare` builds chapter block geometry and confirms an initial batch of at least three pages. `extend` resumes the retained line cursor, unfinished page, flows and deferred notes without changing delivered pages. Completion describes the current chapter. Block geometry still requires the whole chapter, and TXT still builds a full DOM; these stages are not yet streaming. The host owns packed 4bpp pixels and their borrowing lifetime. Close documents before fonts and platform context. Budget statistics currently cover FreeType, shared sources and grayscale scratch buffers, **not all DOM, C++ or dependency allocations**.
+`cre_mcu_initialize` starts fonts; previews do not create a document. Font sources share four 4 KiB blocks per path and close at their final reference. `cre_document_open` admits one active document. EPUB indexes survive chapter changes without retaining chapter DOM nodes. `prepare` builds chapter block geometry and confirms an initial batch of at least three pages. `extend` resumes the retained line cursor, unfinished page, flows and deferred notes without changing delivered pages. Completion describes the current chapter. Block geometry still requires the whole chapter, and TXT still builds a full DOM; these stages are not yet streaming. The host owns packed 4bpp pixels and their borrowing lifetime. Close documents before fonts and platform context. Budget statistics cover FreeType, HarfBuzz, glyph bitmaps, metrics, shared sources and grayscale scratch buffers, **not all DOM, C++ or dependency allocations**. Optional metric-cache failures retain the computed result; failed glyph or shaping allocations never publish partial pixels. Shutdown explicitly frees HarfBuzz global caches after the final font reference, supporting reopen and allocation-failure recovery.
 
 `cre_mcu_build_identity()` 无初始化副作用，身份包含构建源码、依赖提交、裁剪选项和用户代理样式，可直接用作字体与布局缓存身份的一部分。修改编译选项时应同步修改 `crsetup.h.in` 或依赖构建入口，使身份随行为变化。
 
@@ -69,6 +69,7 @@ The build excludes system font discovery, mmap, signal handling, color page back
 - `ports/utf8proc.c` 来自固定 utf8proc 提交，修正 S31 上 `int32_t` 为 `long` 时与 `int *` 状态接口的类型不一致。
 - `ports/fribidi` 表由同一 submodule 的 Unicode 输入生成，更新版本时运行 `python3 mcu/generate_fribidi.py`，不要手工改表。
 - FriBidi 只编译 Unicode 排序需要的模块。`ports/harfbuzz.cc` 在加载标准库后隔离 Picolibc `_S` 宏，避免污染 HarfBuzz 的字符串表宏。
+- HarfBuzz 通过自定义分配器纳入预算；原本进程退出时执行的缓存清理由服务关闭执行。构建目录的 `hb-common_mcu.cc` 不跨关闭保留默认语言句柄，crengine 同时释放语言配置中的借用句柄。
 - `cr3gui/data` 中的上游样式在配置时嵌入，保持 EPUB 章节分页、HTML 表格及列表语义；无需在设备上部署 CSS 文件。
 
 FreeType 可变字体初始化失败时，构建目录中的 `ttgxvar_mcu.c` 修正空 `mmvar` 的清理；配置阶段校验唯一修改位置。预览同时返回按 `wght` 标签识别的字重轴能力，不把 Literata 的 `opsz` 当成字重。
@@ -78,6 +79,8 @@ The build applies a guarded `mmvar` cleanup fix to generated `ttgxvar_mcu.c`, ch
 Static fonts use the nearest available design when a lighter weight is absent, without eroding thin serif strokes through negative outline synthesis. Heavier weights may still be synthesized; variable fonts select actual outlines through their `wght` axis.
 
 Port copies retain their upstream licenses. The FreeType hash port fixes allocation-failure cleanup; utf8proc bridges its public `int *` state to a local `utf8proc_int32_t` on S31. Regenerate FriBidi tables with `python3 mcu/generate_fribidi.py` after upgrading its pinned sources. Upstream user-agent CSS is embedded at configuration time.
+
+HarfBuzz uses the shared allocator and runs its exit-cache callbacks at service shutdown. Generated `hb-common_mcu.cc` avoids retaining a default language across shutdown; crengine also discards language configurations that borrow those handles.
 
 ## 可复跑测试 / Reproducible tests
 

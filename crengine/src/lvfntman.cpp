@@ -1054,7 +1054,14 @@ public:
         if (inx >= COUNT) return;
         lUInt16 * ptr = ptrs[inx];
         if ( !ptr ) {
+#if CR_MCU
+            // 中文：度量缓存可重建；预算不足时直接使用本次已计算值。
+            // English: Metrics are rebuildable; use the computed value when the cache budget is exhausted.
+            ptr = static_cast<lUInt16 *>(cre_mcu_allocate_optional(sizeof(lUInt16) * 512));
+            if (!ptr) return;
+#else
             ptr = new lUInt16[512];
+#endif
             ptrs[inx] = ptr;
             memset( ptr, CACHED_UNSIGNED_METRIC_NOT_SET, sizeof(lUInt16) * 512 );
         }
@@ -1065,7 +1072,11 @@ public:
         FONT_GLYPH_CACHE_GUARD
         for ( int i=0; i<360; i++ ) {
             if ( ptrs[i] )
+#if CR_MCU
+                cre_mcu_release(ptrs[i]);
+#else
                 delete [] ptrs[i];
+#endif
             ptrs[i] = NULL;
         }
     }

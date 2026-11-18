@@ -247,6 +247,8 @@ extern "C" int cre_mcu_initialize(const cre_mcu_platform_t *p) {
 extern "C" uint64_t cre_mcu_build_identity(void) { return CRE_BUILD_ID; }
 extern "C" void cre_mcu_shutdown(void) {
     ShutdownFontManager(); initialized = false; shared_library = nullptr;
+    TextLangMan::uninit();
+    cre_mcu_harfbuzz_shutdown();
 }
 extern "C" void cre_mcu_statistics(cre_mcu_stats_t *out) { if (out) *out = stats; }
 extern "C" int cre_mcu_font_preview(const char *path, const char *text, uint32_t pixels, uint32_t weight,

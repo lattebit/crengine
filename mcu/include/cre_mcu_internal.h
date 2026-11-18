@@ -5,6 +5,7 @@
  */
 #pragma once
 #include "cre_mcu.h"
+#include "cre_mcu_memory.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_MODULE_H
@@ -12,9 +13,6 @@
 #include "lvstream.h"
 struct CreMcuFailure { int code; };
 void cre_mcu_checkpoint();
-void *cre_mcu_allocate(size_t bytes);
-void *cre_mcu_allocate_optional(size_t bytes);
-void cre_mcu_release(void *data);
 void cre_mcu_reset_error();
 int cre_mcu_error();
 FT_Error cre_mcu_new_library(FT_Library *out);

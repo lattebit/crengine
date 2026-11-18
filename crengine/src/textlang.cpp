@@ -152,6 +152,11 @@ lUInt32 TextLangMan::getHash() {
 // No need to explicitely call this in frontend code.
 // Calling HyphMan::uninit() will have this one called.
 void TextLangMan::uninit() {
+#if CR_MCU
+    // 中文：服务可关闭并重开，先丢弃借用的 HarfBuzz 语言句柄。
+    // English: Services can reopen; discard borrowed HarfBuzz language handles before its pool is freed.
+    _lang_cfg_list.clear();
+#endif
 }
 
 // For HyphMan legacy methods
