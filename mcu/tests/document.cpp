@@ -54,6 +54,25 @@ int main(int argc, char **argv) {
             assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
             if (!attempt) {
                 original = image; assert(!sources.writes && !sources.hits);
+                // 中文：邻章预读不改变正文、命中区域或当前位置；热命中不再读取源文件。
+                // English: Neighbor source prefetch preserves body, hit areas and position; warm hits avoid source reads.
+                char before[2048], after[2048];
+                assert(cre_document_text(document, before, sizeof(before)) == CRE_OK);
+                assert(cre_document_prefetch(document, 2) == CRE_INVALID);
+                platform.fail_read = true;
+                assert(cre_document_prefetch(document, 1) == CRE_IO);
+                platform.fail_read = false;
+                assert(cre_document_text(document, after, sizeof(after)) == CRE_OK && !std::strcmp(before, after));
+                platform.cancel = true;
+                assert(cre_document_prefetch(document, 1) == CRE_CANCELLED);
+                platform.cancel = false;
+                assert(cre_document_prefetch(document, 1) == CRE_OK && image == original);
+                auto reads = platform.reads;
+                platform.fail_read = true;
+                assert(cre_document_prefetch(document, 1) == CRE_OK && platform.reads == reads);
+                platform.fail_read = false;
+                assert(cre_document_text(document, after, sizeof(after)) == CRE_OK && !std::strcmp(before, after));
+                assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK && image == original);
                 sources.fail_write = true; assert(cre_document_checkpoint(document) == CRE_OK && !sources.writes);
                 sources.fail_write = false; assert(cre_document_checkpoint(document) == CRE_OK && sources.writes);
             } else assert(image == original && sources.hits);

@@ -58,15 +58,16 @@ public:
     std::array<std::shared_ptr<Data>, 8> entries{};
     uint64_t clock = 0;
     explicit CreSourceCache(LVContainerRef input) : archive(input) {}
-    LVStreamRef open(const lChar32 *name, lvopen_mode_t mode) {
-        if (mode != LVOM_READ || !eligible(lString32(name))) return archive->OpenStream(name, mode);
+    LVStreamRef open(const lChar32 *name, lvopen_mode_t mode, bool prefetch = false) {
+        auto uncached = [&]() { return prefetch ? LVStreamRef() : archive->OpenStream(name, mode); };
+        if (mode != LVOM_READ || !eligible(lString32(name))) return uncached();
         uint64_t key = keyFor(lString32(name));
         for (auto &entry : entries) if (entry && entry->key == key) {
             entry->used = ++clock; return LVStreamRef(new SourceStream(entry, name));
         }
         const auto *info = archive->GetObjectInfo(lString32(name));
         size_t bytes = info ? info->GetSize() : 0;
-        if (!bytes || bytes > source_limit) return archive->OpenStream(name, mode);
+        if (!bytes || bytes > source_limit) return uncached();
         size_t slot = entries.size();
         for (;;) {
             size_t used = 0, victim = entries.size(); slot = entries.size();
@@ -76,12 +77,14 @@ public:
                 if (entries[i].use_count() == 1 && (victim == entries.size() || entries[i]->used < entries[victim]->used)) victim = i;
             }
             if (slot < entries.size() && bytes <= cache_limit - used) break;
-            if (victim == entries.size()) return archive->OpenStream(name, mode);
+            // 中文：可选预读不能淘汰当前章节的热源；容量不足时直接跳过。
+            // English: Optional prefetch never evicts the current chapter's hot sources; skip when full.
+            if (prefetch || victim == entries.size()) return uncached();
             entries[victim].reset();
         }
         auto data = std::make_shared<Data>();
         data->bytes = static_cast<uint8_t *>(cre_mcu_allocate_optional(bytes));
-        if (!data->bytes) return archive->OpenStream(name, mode);
+        if (!data->bytes) return uncached();
         data->size = bytes; data->key = key; data->used = ++clock;
         bool hit = callbacks.read && callbacks.read(callbacks.context, key, data->bytes, bytes);
         cre_mcu_checkpoint();
@@ -119,6 +122,7 @@ std::shared_ptr<CreSourceCache> cre_source_cache_create(LVContainerRef archive, 
     wrapped = LVContainerRef(new Container(cache)); return cache;
 }
 void cre_source_cache_bind(CreSourceCache &cache, const cre_source_cache &callbacks) { cache.callbacks = callbacks; }
+void cre_source_cache_prefetch(CreSourceCache &cache, const lChar32 *name) { (void)cache.open(name, LVOM_READ, true); }
 void cre_source_cache_checkpoint(CreSourceCache &cache) {
     for (auto &entry : cache.entries) if (entry && entry->dirty && cache.callbacks.write) {
         cre_mcu_checkpoint();

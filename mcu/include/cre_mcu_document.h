@@ -18,6 +18,8 @@ typedef struct {
 int cre_document_source_cache(cre_document *document, const cre_source_cache *cache);
 /// 只在显式检查点持久化近期源；失败保留可重试脏项。/ Persist recent sources at explicit checkpoints; retain failed dirty entries for retry.
 int cre_document_checkpoint(cre_document *document);
+/// 预读邻章源，不创建布局或改变当前页；容量不足跳过，取消仍返回错误。/ Prefetch chapter source without layout or page changes; skip when full and report cancellation.
+int cre_document_prefetch(cre_document *document, uint32_t chapter);
 typedef struct {
     uint32_t width, height, pixels, weight; ///< 页面与字体参数 / Page and font parameters
     uint32_t margin, line_percent, paragraph_quarters, indent, override_style; ///< 排版选项 / Typography options

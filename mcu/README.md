@@ -43,6 +43,9 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 
 EPUB XHTML/HTML/CSS source bytes are independent of fonts/layout and share a bounded cache: eight entries, 512 KiB total, 256 KiB per entry. Oversized resources retain direct ZIP streaming. Source bytes use the tracked allocation budget, and readers pin their entries. `cre_document_source_cache` attaches host persistence; only explicit `cre_document_checkpoint` calls write dirty entries, retaining failures for retry. Layout changes preserve source data.
 
+`cre_document_prefetch` 只预读指定 EPUB 章节源，不创建第二个 DOM、字体或页面，也不改变当前内容位置。仅使用剩余源缓存容量，不为预读淘汰热源；超大章节或预算不足直接跳过。取消或读盘失败归还未完成的数据，当前布局和借用像素保持有效。
+`cre_document_prefetch` reads only the requested EPUB chapter source, without another DOM, font, page or position change. It uses spare source-cache capacity without evicting hot entries, skipping oversized chapters or insufficient budget. Cancellation or failed reads discard incomplete source data while preserving the current layout and borrowed pixels.
+
 EPUB 的主语言只读取元数据下第一条 Dublin Core 语言，按命名空间 URI 识别并保留首条为空的语义。
 Read only the first Dublin Core language directly under EPUB metadata, resolving namespace URIs and retaining an empty first value.
 

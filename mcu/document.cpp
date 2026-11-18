@@ -217,6 +217,16 @@ extern "C" int cre_document_checkpoint(cre_document *d) {
     if (!d) return CRE_INVALID;
     return boundary([&]() -> int { if (d->sources) cre_source_cache_checkpoint(*d->sources); return CRE_OK; });
 }
+extern "C" int cre_document_prefetch(cre_document *d, uint32_t chapter) {
+    if (!d || chapter >= d->metadata.chapters) return CRE_INVALID;
+    return boundary([&]() -> int {
+        if (d->sources && d->index.ready) {
+            auto path = LVCombinePaths(d->index.codeBase, d->index.chapters[chapter].href);
+            cre_source_cache_prefetch(*d->sources, path.c_str());
+        }
+        return CRE_OK;
+    });
+}
 extern "C" int cre_document_metadata(cre_document *d, cre_metadata *out) {
     if (!d || !out) return CRE_INVALID;
     *out = d->metadata; return CRE_OK;
