@@ -40,9 +40,9 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 嵌入字体通过可选 `cache_font` 回调按需提取，回调分块读取解包/解混淆后的资源并返回普通文件路径。随后复用外部字体的四个 4 KiB 共享读取块，不创建整份字体内存副本。宿主必须把文档身份纳入缓存键，并在文件可能被使用时保护它；取消、I/O 和内存错误仍传播到请求。没有可用磁盘缓存时，`CRE_BUSY` 选择有界的原资源流回退，缓存同样跨字号共享。
 Embedded fonts use optional `cache_font` extraction: the callback reads unpacked/deobfuscated resource chunks and returns a regular file path. Fonts then reuse the external-font path and its four shared 4 KiB blocks without a complete in-memory copy. The host must scope cache keys by document identity and protect files while they may be used. Cancellation, I/O and memory failures propagate to the request. `CRE_BUSY` selects bounded original-resource streaming when disk caching is unavailable, also sharing its cache across sizes.
 
-`cre_mcu_build_identity()` 无初始化副作用，身份包含构建源码、依赖提交、裁剪选项和用户代理样式，可直接用作字体与布局缓存身份的一部分。修改编译选项时应同步修改 `crsetup.h.in` 或依赖构建入口，使身份随行为变化。
+`cre_mcu_build_identity()` 无初始化副作用，身份包含构建源码、依赖提交、目标 ABI、编译器、构建类型、裁剪选项和用户代理样式，可直接用作字体与布局缓存身份的一部分。修改编译选项时应同步修改 `crsetup.h.in` 或依赖构建入口，使身份随行为变化。
 
-`cre_mcu_build_identity()` requires no initialization. Its source/dependency/configuration/style fingerprint belongs in font and layout cache keys. Keep build options in the checked build inputs so behavior changes invalidate the identity.
+`cre_mcu_build_identity()` requires no initialization. Its source/dependency/ABI/compiler/build-type/configuration/style fingerprint belongs in font and layout cache keys. Keep build options in the checked build inputs so behavior changes invalidate the identity.
 
 EPUB XHTML/HTML/CSS source bytes are independent of fonts/layout and share a bounded cache: eight entries, 512 KiB total, 256 KiB per entry. Oversized resources retain direct ZIP streaming. Source bytes use the tracked allocation budget, and readers pin their entries. `cre_document_source_cache` attaches host persistence; only explicit `cre_document_checkpoint` calls write dirty entries, retaining failures for retry. Layout changes preserve source data.
 

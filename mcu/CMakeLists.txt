@@ -47,7 +47,9 @@ set(CRE_ID_INPUTS ${CRE_MCU_SOURCES} ${CRE_HEADERS} ${CRE_PORTS}
     "${CMAKE_CURRENT_LIST_DIR}/source_cache.cpp" "${CMAKE_CURRENT_LIST_DIR}/source_cache.h"
     "${CMAKE_CURRENT_LIST_DIR}/layout_cache.cpp" "${CMAKE_CURRENT_LIST_DIR}/layout_cache.h"
     "${CMAKE_CURRENT_LIST_DIR}/crsetup.h.in" "${CMAKE_CURRENT_LIST_DIR}/cre_stylesheets.h.in")
-set(CRE_ID_MATERIAL "${CRE_HTML_CSS}${CRE_EPUB_CSS}${CRE_FB2_CSS}${CRE_TXT_CSS}")
+# 中文：原生 DOM 缓存不能跨 ABI 或编译器复用，模拟器与固件必须拥有不同身份。
+# English: Native DOM caches cannot cross ABIs or compilers; simulator and firmware identities must differ.
+set(CRE_ID_MATERIAL "${CMAKE_SIZEOF_VOID_P}:${CMAKE_SYSTEM_PROCESSOR}:${CMAKE_CXX_COMPILER_ID}:${CMAKE_CXX_COMPILER_VERSION}:${CMAKE_BUILD_TYPE}:${CRE_HTML_CSS}${CRE_EPUB_CSS}${CRE_FB2_CSS}${CRE_TXT_CSS}")
 foreach(input IN LISTS CRE_ID_INPUTS)
     file(SHA256 "${input}" hash)
     string(APPEND CRE_ID_MATERIAL "${hash}")
