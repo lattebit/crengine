@@ -39,10 +39,21 @@ void crSetFatalErrorHandler( lv_FatalErrorHandler_t * handler );
 
 /// typed realloc with result check (size is counted in T), fatal error if failed
 template <typename T> inline T * cr_realloc( T * ptr, size_t newSize ) {
+#if CR_MCU
+    // 中文：异常清理仍归调用者，失败不能释放旧块；先检查乘法溢出。
+    // English: The caller still owns cleanup during unwinding; preserve old storage and check multiplication overflow.
+    if (!newSize) { free(ptr); return NULL; }
+    if (newSize > size_t(-1) / sizeof(T)) {
+        crFatalError(-2, "realloc size overflow");
+        return NULL;
+    }
+#endif
     T * newptr = reinterpret_cast<T*>(realloc(ptr, sizeof(T)*newSize));
     if ( newptr )
         return newptr;
+#if !CR_MCU
     free(ptr); // to bypass cppcheck warning
+#endif
     crFatalError(-2, "realloc failed");
     return NULL;
 }

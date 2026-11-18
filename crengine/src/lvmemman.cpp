@@ -77,7 +77,7 @@ void lvDefFatalErrorHandler (int errorCode, const char * errorText )
     // int * a = 0; *a = 1;
 #ifdef CR_MCU
     // 中文：错误回到服务边界；固件不能退出进程。/ English: Return errors to the service boundary; firmware must never exit.
-    throw CreMcuFailure{CRE_CONTENT};
+    throw CreMcuFailure{errorCode == -2 ? CRE_MEMORY : CRE_CONTENT};
 #else
     exit( errorCode );
 #endif
