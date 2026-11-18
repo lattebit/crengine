@@ -17,6 +17,10 @@
 #include <time.h>
 #if CR_MCU
 #include "cre_mcu_internal.h"
+#include <algorithm>
+#include <memory>
+#include <unordered_map>
+#include <vector>
 #endif
 
 // Uncomment to use old page splitter code
@@ -1340,6 +1344,154 @@ LVRendPageContext::~LVRendPageContext()
 }
 
 #if CR_MCU
+namespace {
+constexpr int mcuStateLimit = 8 * 1024 * 1024;
+bool validMcuState(SerialBuf &buf, const char *magic) {
+    if (buf.size() < 12 || buf.size() > mcuStateLimit) return false;
+    buf.reset(); buf.setPos(buf.size() - 4);
+    if (!buf.checkCRC(buf.size() - 4)) return false;
+    buf.reset(); return buf.checkMagic(magic);
+}
+bool mcuCount(SerialBuf &buf, int &count, unsigned minimum) {
+    buf >> count;
+    return !buf.error() && count >= 0 && count <= (buf.space() - 4) / int(minimum);
+}
+}
+
+bool LVRendPageContext::saveMcuState(SerialBuf &geometry, SerialBuf &cursor) {
+    if (!page_list || !mcu_splitter || curr_note || !gather_lines) return false;
+    // 中文：固定排序让恢复后的检查点保持相同几何身份，便于跳过未改变的块。
+    // English: Stable ordering retains geometry identity after restoration so unchanged blocks can be skipped.
+    std::vector<std::pair<lString32, LVFootNoteRef>> names;
+    auto iterator = footNotes.forwardIterator();
+    while (auto *pair = iterator.next()) names.emplace_back(pair->key, pair->value);
+    std::sort(names.begin(), names.end(), [](const auto &a, const auto &b) { return a.first.compare(b.first) < 0; });
+    std::vector<LVFootNote *> notes;
+    std::unordered_map<LVFootNote *, int> noteIds;
+    for (auto &name : names) if (!noteIds.count(name.second.get())) {
+        noteIds.emplace(name.second.get(), notes.size()); notes.push_back(name.second.get());
+    }
+    std::unordered_map<LVRendLineInfo *, int> lineIds;
+    geometry.reset(); geometry.putMagic("MCUG1");
+    geometry << page_h << doc_font_size << current_flow << max_flow << current_flow_empty << curr_note_id;
+    geometry << lines.length() << int(notes.size());
+    for (int i = 0; i < lines.length(); ++i) {
+        cre_mcu_checkpoint(); auto *line = lines[i]; lineIds.emplace(line, i);
+        geometry << line->getStart() << line->getHeight() << line->flags << line->flow;
+    }
+    for (auto *note : notes) {
+        cre_mcu_checkpoint();
+        geometry << note->id << note->is_actual << (note->actual_footnote ? noteIds.at(note->actual_footnote) : -1);
+        geometry << note->lines.length();
+        for (int i = 0; i < note->lines.length(); ++i) geometry << lineIds.at(note->lines[i]);
+    }
+    geometry << int(names.size());
+    for (auto &name : names) geometry << name.first << noteIds.at(name.second.get());
+    for (int i = 0; i < lines.length(); ++i) {
+        auto *line = lines[i]; geometry << line->getLinksCount();
+        for (int j = 0; j < line->getLinksCount(); ++j) geometry << noteIds.at((*line->getLinks())[j]);
+    }
+    if (geometry.error() || geometry.pos() > mcuStateLimit - 4) return false;
+    lUInt32 identity = geometry.getCRC(); geometry.putCRC(geometry.pos());
+    auto &state = *mcu_splitter;
+    cursor.reset(); cursor.putMagic("MCUC1"); cursor << identity << page_list->length();
+    cursor << state.cursor << state.group_start << state.cur_page_top << state.cur_page_bottom << state.cur_page_footnotes_h
+           << state.cur_page_nb_lines << state.cur_page_nb_lines_rtl << state.cur_page_nb_footnotes_lines
+           << state.cur_page_nb_footnotes_lines_rtl << state.cur_page_flow << state.prev_page_flow;
+    cursor << state.cur_page_footnotes.length();
+    for (int i = 0; i < state.cur_page_footnotes.length(); ++i)
+        cursor << state.cur_page_footnotes[i].start << state.cur_page_footnotes[i].height;
+    for (auto *list : {&state.cur_page_seen_footnotes, &state.delayed_footnotes}) {
+        cursor << list->length();
+        for (int i = 0; i < list->length(); ++i) cursor << noteIds.at((*list)[i]);
+    }
+    if (cursor.error() || cursor.pos() > mcuStateLimit - 4) return false;
+    cursor.putCRC(cursor.pos()); return !cursor.error();
+}
+
+LVRendPageContext *LVRendPageContext::restoreMcuState(SerialBuf &geometry, SerialBuf &cursor, LVRendPageList *pages) {
+    if (!pages || !validMcuState(geometry, "MCUG1") || !validMcuState(cursor, "MCUC1")) return nullptr;
+    lUInt32 identity = 0; int pageCount = 0;
+    cursor >> identity >> pageCount;
+    if (identity != lStr_crc32(0, geometry.buf(), geometry.size() - 4) || pageCount != pages->length()) return nullptr;
+    int height = 0, font = 0, flow = 0, maxFlow = 0, lineCount = 0, noteCount = 0;
+    bool empty = false; lString32 noteId;
+    geometry >> height >> font >> flow >> maxFlow >> empty >> noteId;
+    if (geometry.error() || height < 1 || height > 32767 || font < 1 || font > 1024 || flow < 0 || maxFlow < flow || maxFlow > 65535
+        || !mcuCount(geometry, lineCount, 16) || !mcuCount(geometry, noteCount, 11)) return nullptr;
+    auto context = std::make_unique<LVRendPageContext>(pages, height, font);
+    context->current_flow = flow; context->max_flow = maxFlow; context->current_flow_empty = empty; context->curr_note_id = noteId;
+    for (int i = 0; i < lineCount; ++i) {
+        cre_mcu_checkpoint(); int start = 0, h = 0; lUInt16 flags = 0, lineFlow = 0;
+        geometry >> start >> h >> flags >> lineFlow;
+        if (geometry.error() || start < -(1 << 29) || start > (1 << 29) || h < 0 || h > (1 << 29) || lineFlow > maxFlow) return nullptr;
+        auto line = std::make_unique<LVRendLineInfo>(start, start + h, flags, lineFlow);
+        context->lines.add(line.get()); line.release();
+    }
+    std::vector<LVFootNoteRef> notes; std::vector<int> targets;
+    for (int i = 0; i < noteCount; ++i) {
+        cre_mcu_checkpoint(); lString32 id; bool actual = false; int target = -1, count = 0;
+        geometry >> id >> actual >> target;
+        if (geometry.error() || target < -1 || target >= noteCount || (actual && target != -1) || !mcuCount(geometry, count, 4)) return nullptr;
+        LVFootNoteRef note(new LVFootNote(id)); note->is_actual = actual;
+        for (int j = 0; j < count; ++j) {
+            int line = -1; geometry >> line;
+            if (geometry.error() || line < 0 || line >= lineCount) return nullptr;
+            note->addLine(context->lines[line]);
+        }
+        notes.push_back(note); targets.push_back(target);
+    }
+    for (int i = 0; i < noteCount; ++i) if (targets[i] >= 0) {
+        auto *target = notes[targets[i]].get();
+        if (!target->is_actual || targets[targets[i]] != -1) return nullptr;
+        notes[i]->setActualFootnote(target);
+    }
+    int names = 0; if (!mcuCount(geometry, names, 6)) return nullptr;
+    for (int i = 0; i < names; ++i) {
+        lString32 name; int index = -1; geometry >> name >> index;
+        if (geometry.error() || index < 0 || index >= noteCount || !context->footNotes.get(name).isNull()) return nullptr;
+        context->footNotes.set(name, notes[index]);
+    }
+    // 中文：每个脚注必须被归属表持有，不能在局部引用释放后留下悬空链接。
+    // English: The ownership table must retain every footnote before local references are released.
+    for (auto &note : notes) if (note->getRefCount() < 2) return nullptr;
+    for (int i = 0; i < lineCount; ++i) {
+        int count = 0; if (!mcuCount(geometry, count, 4)) return nullptr;
+        for (int j = 0; j < count; ++j) {
+            int index = -1; geometry >> index;
+            if (geometry.error() || index < 0 || index >= noteCount) return nullptr;
+            context->lines[i]->addLink(notes[index].get());
+        }
+    }
+    if (geometry.pos() != geometry.size() - 4) return nullptr;
+    auto state = std::make_unique<PageSplitState2>(pages, context->lines, height, font);
+    cursor >> state->cursor >> state->group_start >> state->cur_page_top >> state->cur_page_bottom >> state->cur_page_footnotes_h
+           >> state->cur_page_nb_lines >> state->cur_page_nb_lines_rtl >> state->cur_page_nb_footnotes_lines
+           >> state->cur_page_nb_footnotes_lines_rtl >> state->cur_page_flow >> state->prev_page_flow;
+    if (cursor.error() || state->cursor < 0 || state->cursor > lineCount || state->group_start < 0 || state->group_start > state->cursor
+        || state->cur_page_flow < -1 || state->cur_page_flow > maxFlow || state->prev_page_flow < 0 || state->prev_page_flow > maxFlow) return nullptr;
+    for (int value : {state->cur_page_top, state->cur_page_bottom, state->cur_page_footnotes_h,
+                      state->cur_page_nb_lines, state->cur_page_nb_lines_rtl, state->cur_page_nb_footnotes_lines, state->cur_page_nb_footnotes_lines_rtl})
+        if (value < -(1 << 29) || value > (1 << 29)) return nullptr;
+    int fragments = 0; if (!mcuCount(cursor, fragments, 8)) return nullptr;
+    for (int i = 0; i < fragments; ++i) {
+        int start = 0, h = 0; cursor >> start >> h;
+        if (cursor.error() || start < -(1 << 29) || start > (1 << 29) || h < 0 || h > (1 << 29)) return nullptr;
+        state->cur_page_footnotes.add(LVPageFootNoteInfo(start, h));
+    }
+    for (auto *list : {&state->cur_page_seen_footnotes, &state->delayed_footnotes}) {
+        int count = 0; if (!mcuCount(cursor, count, 4)) return nullptr;
+        for (int i = 0; i < count; ++i) {
+            int index = -1; cursor >> index;
+            if (cursor.error() || index < 0 || index >= noteCount) return nullptr;
+            list->add(notes[index].get());
+        }
+    }
+    if (cursor.pos() != cursor.size() - 4) return nullptr;
+    pages->setHasNonLinearFlows(maxFlow > 0);
+    context->mcu_splitter = state.release(); return context.release();
+}
+
 bool LVRendPageContext::FinalizeTo(int pages)
 {
     if (main_context == this) main_context = NULL;

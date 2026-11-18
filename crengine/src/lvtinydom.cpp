@@ -5585,6 +5585,16 @@ bool ldomDocument::partialRender( ldomNode * node ) {
 }
 
 #if CR_MCU
+bool ldomDocument::saveMcuPageState(SerialBuf &geometry, SerialBuf &cursor)
+{
+    return _mcu_page_context && _mcu_page_context->saveMcuState(geometry, cursor);
+}
+bool ldomDocument::restoreMcuPageState(SerialBuf &geometry, SerialBuf &cursor, LVRendPageList *pages)
+{
+    auto *state = LVRendPageContext::restoreMcuState(geometry, cursor, pages);
+    if (!state) return false;
+    delete _mcu_page_context; _mcu_page_context = state; return true;
+}
 bool ldomDocument::continueMcuPages(int pages)
 {
     if (!_mcu_page_context) return true;

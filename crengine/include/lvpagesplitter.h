@@ -331,6 +331,9 @@ typedef LVFastRef<LVFootNote> LVFootNoteRef;
 // When not yet actual, it may be diverted to another already created LVFootnote (when
 // an actual footnote contains, and is then associated to, multiple id=).
 class LVFootNote : public LVRefCounter {
+#if CR_MCU
+    friend class LVRendPageContext;
+#endif
     lString32 id;
     bool is_actual; // set when a LVFootNote holds text (it should then never become a proxy to another one)
     LVFootNote * actual_footnote; // when set, this LVFootNote is a proxy to this actual_footnote
@@ -582,6 +585,12 @@ public:
 #if CR_MCU
     /// 保留脚注、流与未完成页；只交付已封口页面。/ Retain notes, flows and the unfinished page; publish closed pages only.
     bool FinalizeTo(int pages);
+    /// 分离保存固定几何和可续算游标；引用编码为索引，不保存指针。
+    /// Save fixed geometry separately from the resumable cursor, encoding references as indices rather than pointers.
+    bool saveMcuState(SerialBuf &geometry, SerialBuf &cursor);
+    /// 校验后创建独立状态；失败不修改已发布的页表。
+    /// Construct independent state after validation; failure leaves the published page list untouched.
+    static LVRendPageContext *restoreMcuState(SerialBuf &geometry, SerialBuf &cursor, LVRendPageList *pages);
 #endif
 
     /// add source line

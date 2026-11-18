@@ -116,6 +116,9 @@ Typography tests inspect real character positions across thirteen widths for ope
 EPUB 资源表和阅读顺序各最多 32768 项，解析时在建立下一节点前拒绝超限输入。边界测试同时检查上限、超限清理与随后重开。这是条目数限制，不代表上限规模在 MCU 内存中一定可用。
 EPUB manifests and spines admit at most 32768 entries each, rejecting excess input before creating the next node. Boundary tests cover the limit, rejected-document cleanup and reopening. This entry-count limit does not guarantee that a document at the limit fits MCU memory.
 
+分页器可分别序列化固定行几何与续算游标，脚注及别名引用使用索引，恢复前校验摘要、长度和引用范围。测试在每次恢复后对照完整分页，并覆盖损坏、截断、取消、非线性流及跨页脚注。这是持久布局的基础机制，当前文档服务尚未接入磁盘布局恢复。
+The paginator serializes fixed line geometry separately from its continuation cursor, encoding footnotes and aliases as indices. Restoration validates checksums, lengths and reference ranges. Tests compare every restored run against complete pagination, including corruption, truncation, cancellation, nonlinear flows and spanning footnotes. This is groundwork for persistent layout; the document service does not yet restore disk layouts.
+
 Linux sanitizer 构建额外传入以下三个选项，然后运行相同 CTest：
 For Linux sanitizer builds, add these options and run the same CTest suite:
 

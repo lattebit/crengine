@@ -36,6 +36,13 @@ static std::vector<uint8_t> draw(LVDocView &view, int page) {
     for (int y = 0; y < 640; ++y) std::memcpy(pixels.data() + y * 480, buffer.GetScanLine(y), 480);
     return pixels;
 }
+static void restorePagination(LVDocView &view) {
+    auto *document = view.getDocument();
+    if (document->mcuPagesComplete()) return;
+    SerialBuf geometry(0), cursor(0); assert(document->saveMcuPageState(geometry, cursor));
+    SerialBuf fixed(geometry.buf(), geometry.pos()), position(cursor.buf(), cursor.pos());
+    assert(document->restoreMcuPageState(fixed, position, view.getPageList()));
+}
 int main(int argc, char **argv) {
     assert(argc == 3); Platform platform; auto cfg = config(platform);
     assert(cre_mcu_initialize(&cfg) == CRE_OK);
@@ -51,6 +58,7 @@ int main(int argc, char **argv) {
         auto partial = load(std::string(argv[2]) + "/fixture." + extension, 24, nullptr, -1, false, 1);
         auto first = draw(*partial, 0);
         for (int page = 0; page < view->getPageCount(); ++page) {
+            restorePagination(*partial);
             partial->getDocument()->continueMcuPages(page + 1);
             assert(draw(*partial, 0) == first && draw(*partial, page) == draw(*view, page));
         }
@@ -65,6 +73,7 @@ int main(int argc, char **argv) {
         assert(!partial->getDocument()->mcuPagesComplete());
         auto first = draw(*partial, 0);
         for (int page = 0; page < full->getPageCount(); ++page) {
+            restorePagination(*partial);
             partial->getDocument()->continueMcuPages(page + 1);
             assert(draw(*partial, 0) == first);
             assert(draw(*partial, page) == draw(*full, page));

@@ -2959,6 +2959,10 @@ public:
     /// 续算保留状态，完成后归还行与脚注工作集。/ Resume retained state and release lines/notes upon completion.
     bool continueMcuPages(int pages);
     bool mcuPagesComplete() const { return _mcu_page_context == NULL; }
+    /// 分离导出固定行几何和分页游标。/ Export fixed line geometry separately from the pagination cursor.
+    bool saveMcuPageState(SerialBuf &geometry, SerialBuf &cursor);
+    /// 完整校验后替换续算状态，保持当前已确认页。/ Replace continuation state after validation, retaining confirmed pages.
+    bool restoreMcuPageState(SerialBuf &geometry, SerialBuf &cursor, LVRendPageList *pages);
 #endif
     bool isBeingParsed() { return _parsing; }
     /// renders (formats) document in memory: returns true if re-rendering needed, false if not
