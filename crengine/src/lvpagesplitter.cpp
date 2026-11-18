@@ -15,6 +15,9 @@
 #include "../include/lvpagesplitter.h"
 #include "../include/lvtinydom.h"
 #include <time.h>
+#if CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 // Uncomment to use old page splitter code
 // #define USE_LEGACY_PAGESPLITTER
@@ -815,6 +818,7 @@ public:
     int doc_font_size;
     int footnote_margin;
     int nb_lines;
+    int cursor = 0, group_start = 0;
 
     int cur_page_top;
     int cur_page_bottom;
@@ -1247,7 +1251,7 @@ public:
         }
     }
 
-    void splitToPages() {
+    void splitToPages(int maximum_pages = 0) {
         // A "line" is a slice of the document, it's a unit of what can be stacked
         // into pages. It has a y coordinate as start and an other at end,
         // that make its height.
@@ -1269,8 +1273,11 @@ public:
         // widows/orphans, lines of text surrounded by floats spanning them...
         //
         // Check for and handle lines per group of non-breakable lines
-        int start = 0;
-        for ( int i=0; i < nb_lines; i++ ) {
+        while (cursor < nb_lines && (!maximum_pages || page_list->length() < maximum_pages)) {
+#if CR_MCU
+            cre_mcu_checkpoint();
+#endif
+            int i = cursor++;
             #ifdef DEBUG_PAGESPLIT
                 LVRendLineInfo * line = lines[i];
                 printf("PS:   line %d>%d h=%d, flags=<%d|%d>\n",
@@ -1304,8 +1311,8 @@ public:
             }
             // We're allowed to break after cur_line (most often, we
             // have start==i and we're just adding a single line).
-            addLinesToPage(start, i);
-            start = i+1;
+            addLinesToPage(group_start, i);
+            group_start = i+1;
             if ( force_new_page && nxt_line_start < cur_page_bottom ) {
                 // Next line is backward and overlaps with what has been put
                 // on current page: cancel the forced page break
@@ -1323,6 +1330,28 @@ public:
     }
 };
 #endif // !USE_LEGACY_PAGESPLITTER
+
+LVRendPageContext::~LVRendPageContext()
+{
+#if CR_MCU
+    delete mcu_splitter;
+#endif
+    if (main_context == this) main_context = NULL;
+}
+
+#if CR_MCU
+bool LVRendPageContext::FinalizeTo(int pages)
+{
+    if (main_context == this) main_context = NULL;
+    if (!page_list) return true;
+    if (!mcu_splitter) mcu_splitter = new PageSplitState2(page_list, lines, page_h, doc_font_size);
+    mcu_splitter->splitToPages(pages);
+    if (mcu_splitter->cursor < mcu_splitter->nb_lines) return false;
+    delete mcu_splitter; mcu_splitter = NULL;
+    lines.clear(); footNotes.clear();
+    return true;
+}
+#endif
 
 void LVRendPageContext::split()
 {

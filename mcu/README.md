@@ -27,14 +27,14 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 
 - `cre_mcu_initialize` 初始化字体后端；`cre_mcu_font_preview` 只使用字体，不创建文档。字体源按路径共享四个 4 KiB 读取块；最后一个引用释放时关闭源文件。字体预览引用在成功、失败和取消后全部归还。
 - `cre_document_open` 创建唯一活动文档。EPUB 的 OPF、ZIP 目录、解混淆状态、spine 和导航目录保存在独立 `EpubIndex` 中，正文按章节加载。其他格式保留其解析所需 DOM。
-- `cre_document_prepare` 同步排版当前章节，生成 4bpp 输出。该函数目前完成整个章节的排版；`complete` 表示当前章节已经完成，不表示已排版全书。分页、字体和图像操作均不得在 UI 绘制回调执行。
+- `cre_document_prepare` 准备当前章节的块布局，首批只确定至少三页；后续翻页按需推进。`cre_document_extend` 保留分页器的行游标、未完成页、文档流和延后脚注，不重新分页已交付内容。`complete` 仅表示当前章节结束。当前块布局准备仍覆盖整个章节，TXT 仍构造完整 DOM；这两个阶段尚不是流式续算。分页、字体和图像操作均不得在 UI 绘制回调执行。
 - 像素缓冲由调用者分配和管理：白色为 15，左像素在高半字节。上游 `LVGrayDrawBuf` 的 4/8 位灰阶内部仍为一字节一像素，端口使用可释放的灰阶工作区再打包。不得把半字节输出缓冲直接传给该上游对象。
 - `cre_document_toc`、`resolve`、`prepare` 使用章节和内容路径，不使用全书页号作为持久进度。宿主借用像素期间必须保证缓冲不被重新使用。
 - 关闭顺序为文档、字体后端、平台上下文。取消检查会抛出内部异常，不能从平台的 C 回调抛出异常。
 - 当前预算统计覆盖 FreeType、共享字体源和灰阶临时缓冲。核心 DOM、C++ 对象及部分依赖分配尚未统一纳入该统计；宿主不能把此统计当作整个引擎的内存峰值或完整硬预算。
 - JPEG/PNG 仅做流式尺寸探测，实际像素由 `decode_image` 平台回调使用给定预算分配器生成。回调返回连续八位灰阶，端口按目标尺寸逐行交给绘图层；不需要完整彩色位图。`cre_document_image` 可准备文档内图片，保持正文位置。
 
-`cre_mcu_initialize` starts fonts; previews do not create a document. Font sources share four 4 KiB blocks per path and close at their final reference. `cre_document_open` admits one active document. EPUB indexes survive chapter changes without retaining chapter DOM nodes. `prepare` currently completes layout of the selected chapter synchronously; its completion flag describes that chapter, not the whole book. The host owns packed 4bpp pixels and their borrowing lifetime. Close documents before fonts and platform context. Budget statistics currently cover FreeType, shared sources and grayscale scratch buffers, **not all DOM, C++ or dependency allocations**.
+`cre_mcu_initialize` starts fonts; previews do not create a document. Font sources share four 4 KiB blocks per path and close at their final reference. `cre_document_open` admits one active document. EPUB indexes survive chapter changes without retaining chapter DOM nodes. `prepare` builds chapter block geometry and confirms an initial batch of at least three pages. `extend` resumes the retained line cursor, unfinished page, flows and deferred notes without changing delivered pages. Completion describes the current chapter. Block geometry still requires the whole chapter, and TXT still builds a full DOM; these stages are not yet streaming. The host owns packed 4bpp pixels and their borrowing lifetime. Close documents before fonts and platform context. Budget statistics currently cover FreeType, shared sources and grayscale scratch buffers, **not all DOM, C++ or dependency allocations**.
 
 `cre_mcu_build_identity()` 无初始化副作用，身份包含构建源码、依赖提交、裁剪选项和用户代理样式，可直接用作字体与布局缓存身份的一部分。修改编译选项时应同步修改 `crsetup.h.in` 或依赖构建入口，使身份随行为变化。
 

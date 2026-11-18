@@ -46,6 +46,8 @@ int cre_document_metadata(cre_document *document, cre_metadata *out);
 /// 准备章节页或内容锚点，输出白色为 15 的只读 4bpp。/ Prepare a chapter page or anchor into white=15 packed 4bpp.
 int cre_document_prepare(cre_document *document, const cre_anchor *anchor, uint32_t page,
                          uint8_t *pixels, size_t capacity, cre_page_state *out);
+/// 推进至指定确定页数；零推进到结束，不生成或修改像素。/ Advance to a confirmed page count; zero finishes, without generating or modifying pixels.
+int cre_document_extend(cre_document *document, uint32_t pages, uint32_t *confirmed, uint32_t *complete);
 /// 设置排版并丢弃可重建布局；源索引仍可复用。/ Change layout and discard rebuildable layout while retaining the source index.
 int cre_document_layout(cre_document *document, const cre_layout *layout);
 /// 分批读取与正文加载无关的 EPUB 目录。/ Read EPUB contents independently of body loading.

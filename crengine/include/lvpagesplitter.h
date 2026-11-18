@@ -379,8 +379,12 @@ public:
 };
 
 class LVDocViewCallback;
+struct PageSplitState2;
 class LVRendPageContext
 {
+#if CR_MCU
+    PageSplitState2 *mcu_splitter = NULL;
+#endif
 
 
     LVPtrVector<LVRendLineInfo> lines;
@@ -574,6 +578,11 @@ public:
 
     /// constructor (docFontSize is only needed for with main context actually used to split pages)
     LVRendPageContext(LVRendPageList * pageList, int pageHeight, int docFontSize=0, bool gatherLines=true);
+    ~LVRendPageContext();
+#if CR_MCU
+    /// 保留脚注、流与未完成页；只交付已封口页面。/ Retain notes, flows and the unfinished page; publish closed pages only.
+    bool FinalizeTo(int pages);
+#endif
 
     /// add source line
     void AddLine( int starty, int endy, int flags );

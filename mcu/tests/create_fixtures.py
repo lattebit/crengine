@@ -14,6 +14,16 @@ body += '<table><tr><th>One</th><th>Two</th></tr><tr><td>Cell A</td><td>Cell B</
 body += '<p><a href="#note">Note link</a></p><p id="note">Footnote text.</p>'
 html = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Fixture</title></head><body>' + body + '</body></html>'
 (out / "fixture.html").write_text(html)
+# 复杂分页状态对照，不依赖设备字体设置。/ Complex pagination state comparison independent of device font settings.
+stress = '<div class="float">Floating 中文 text ' + paragraph + '</div><ol start="7">'
+stress += ''.join(f'<li><p>{paragraph * 2}<a href="#n{i % 3}">[{i % 3}]</a></p></li>' for i in range(36)) + '</ol>'
+stress += '<table>' + ''.join(f'<tr><td>{paragraph * 2}</td><td>{paragraph}</td></tr>' for _ in range(12)) + '</table>'
+stress += '<div class="overlap">' + paragraph * 4 + '</div><div class="flow"><p>' + paragraph * 6 + '</p></div>'
+stress += ''.join(f'<aside class="note" id="n{i}"><p>Footnote {i}. {paragraph * (i + 3)}</p></aside>' for i in range(3))
+(out / "pagination.html").write_text('<html xmlns="http://www.w3.org/1999/xhtml"><head><style>'
+    '.float { float: right; width: 35%; margin: 1em; } li { margin-bottom: 0.4em; }'
+    '.overlap { margin-top: -2em; } .flow { -cr-hint: non-linear; } .note { -cr-hint: footnote-inpage; font-size: 80%; }'
+    '</style></head><body>' + stress + '</body></html>')
 (out / "fixture.txt").write_text("Layout fixture\n\n" + "\n\n".join(paragraph * 3 for _ in range(32)))
 (out / "fixture.fb2").write_text('<?xml version="1.0" encoding="UTF-8"?><FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0"><description><title-info><book-title>Fixture</book-title><lang>zh</lang></title-info></description><body><section><title><p>Layout fixture</p></title>' + ''.join('<p>' + paragraph * 3 + '</p>' for _ in range(32)) + '</section></body></FictionBook>')
 (out / "fixture.rtf").write_text(r'{\rtf1\ansi\deff0 {\fonttbl {\f0 Times New Roman;}}\f0\fs24 ' + (r'Anchor target. Reading formatted text. \b Bold\b0  and \i italic\i0 .\par ' * 80) + '}')

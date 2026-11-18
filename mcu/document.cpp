@@ -101,6 +101,7 @@ int load(cre_document &d, uint32_t chapter) {
     if (d.index.ready) view->setEpubIndex(&d.index, static_cast<int>(chapter));
     d.stream->SetPos(0);
     if (!view->LoadDocument(d.stream)) return CRE_CONTENT;
+    view->getDocument()->setMcuPageLimit(3);
     // 中文：封面作为独立资源提供，不插入正文页序列。
     // English: Expose covers as separate resources without inserting them into body pagination.
     view->setShowCover(false);
@@ -214,6 +215,10 @@ extern "C" int cre_document_prepare(cre_document *d, const cre_anchor *anchor, u
     int result = boundary([&]() -> int {
         int result = load(*d, anchor->chapter); if (result != CRE_OK) return result;
         d->view->Render();
+        // 中文：锚点可能指向远处脚注；先确定其布局范围，普通翻页按需推进。
+        // English: Anchors may target distant notes; resolve their layout range first, while ordinary turns advance on demand.
+        if (page >= INT32_MAX) return CRE_INVALID;
+        d->view->getDocument()->continueMcuPages(anchor->path[0] ? 0 : int(page + 1));
         if (anchor->path[0]) {
             if (anchor->path[0] == '#') {
                 if (!d->view->goLink(Utf8ToUnicode(anchor->path), false)) return CRE_CONTENT;
@@ -225,11 +230,21 @@ extern "C" int cre_document_prepare(cre_document *d, const cre_anchor *anchor, u
         } else if (page >= static_cast<uint32_t>(d->view->getPageCount()) || !d->view->goToPage(page)) return CRE_INVALID;
         result = render(*d, pixels, capacity); if (result != CRE_OK) return result;
         collectHits(*d);
-        *out = {}; out->page = d->view->getCurPage(); out->pages = d->view->getPageCount(); out->complete = 1;
+        *out = {}; out->page = d->view->getCurPage(); out->pages = d->view->getPageCount(); out->complete = d->view->getDocument()->mcuPagesComplete();
         out->anchor.chapter = d->chapter;
         auto path = UnicodeToUtf8(d->view->getBookmark().toString());
         if (path.length() >= static_cast<int>(sizeof(out->anchor.path))) return CRE_CONTENT;
         std::strcpy(out->anchor.path, path.c_str()); return CRE_OK;
+    });
+    if (result != CRE_OK) { d->view.reset(); d->chapter = UINT32_MAX; d->hits.clear(); fontMan->gc(); }
+    return result;
+}
+extern "C" int cre_document_extend(cre_document *d, uint32_t pages, uint32_t *confirmed, uint32_t *complete) {
+    if (!d || !d->view || !confirmed || !complete || pages >= INT32_MAX) return CRE_INVALID;
+    int result = boundary([&]() -> int {
+        d->view->checkRender();
+        *complete = d->view->getDocument()->continueMcuPages(int(pages));
+        *confirmed = d->view->getPageCount(); return CRE_OK;
     });
     if (result != CRE_OK) { d->view.reset(); d->chapter = UINT32_MAX; d->hits.clear(); fontMan->gc(); }
     return result;

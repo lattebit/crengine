@@ -5032,6 +5032,9 @@ void ldomDocument::printWarning(const char * msg, int warning_id) {
 
 ldomDocument::~ldomDocument()
 {
+#if CR_MCU
+    delete _mcu_page_context;
+#endif
 #if BUILD_LITE!=1
     updateMap(); // NOLINT: Call to virtual function during destruction
     // Our cache of LFormattedTextRefs may have some with a non-null LVFontRef
@@ -5581,6 +5584,18 @@ bool ldomDocument::partialRender( ldomNode * node ) {
     // a cache save, and will soon reload the document from that new cache.
 }
 
+#if CR_MCU
+bool ldomDocument::continueMcuPages(int pages)
+{
+    if (!_mcu_page_context) return true;
+    if (!_mcu_page_context->FinalizeTo(pages)) return false;
+    _pagesData.reset();
+    _mcu_page_context->getPageList()->serialize(_pagesData);
+    delete _mcu_page_context; _mcu_page_context = NULL;
+    return true;
+}
+#endif
+
 bool ldomDocument::render( LVRendPageList * pages, LVDocViewCallback * callback, int width, int dy,
                            bool showCover, int y0, font_ref_t def_font, int def_interline_space,
                            CRPropRef props, int usable_left_overflow, int usable_right_overflow )
@@ -5728,10 +5743,18 @@ bool ldomDocument::render( LVRendPageList * pages, LVDocViewCallback * callback,
         // session, they will be when loaded from cache next session)
         m_toc.invalidatePageNumbers();
         m_pagemap.invalidatePageInfo();
+#if CR_MCU
+        delete _mcu_page_context; _mcu_page_context = NULL;
+#endif
         pages->clear();
         if ( showCover )
             pages->add( new LVRendPageInfo( _page_height ) );
+#if CR_MCU
+        _mcu_page_context = new LVRendPageContext(pages, _page_height, _def_font->getSize());
+        LVRendPageContext &context = *_mcu_page_context;
+#else
         LVRendPageContext context( pages, _page_height, _def_font->getSize() );
+#endif
         int numFinalBlocks = calcFinalBlocks();
         CRLog::info("Final block count: %d", numFinalBlocks);
         context.setCallback(callback, numFinalBlocks);
@@ -5745,10 +5768,18 @@ bool ldomDocument::render( LVRendPageList * pages, LVDocViewCallback * callback,
     #endif
         gc();
         CRLog::trace("finalizing... fonts.length=%d", _fonts.length());
+#if CR_MCU
+        continueMcuPages(_mcu_page_limit);
+#else
         context.Finalize();
+#endif
         updateRenderContext();
+#if CR_MCU
+        if (_mcu_page_context) _pagesData.reset();
+#else
         _pagesData.reset();
         pages->serialize( _pagesData );
+#endif
         _renderedBlockCache.restoreSize(); // Restore original cache size
 
         if ( _nodeDisplayStyleHashInitial == NODE_DISPLAY_STYLE_HASH_UNINITIALIZED ) {

@@ -2735,6 +2735,10 @@ private:
     int _screen_width;
     bool _parsing;
     bool _rendered;
+#if CR_MCU
+    LVRendPageContext *_mcu_page_context = NULL;
+    int _mcu_page_limit = 0;
+#endif
     bool _just_rendered_from_cache;
     bool _toc_from_cache_valid;
     lUInt32 _warnings_seen_bitmap;
@@ -2949,6 +2953,13 @@ public:
     virtual ~ldomDocument();
 #if BUILD_LITE!=1
     bool isRendered() { return _rendered; }
+#if CR_MCU
+    /// 零为完整基准模式；正数限制首批确定页数。/ Zero selects full baseline mode; positive values limit the first confirmed batch.
+    void setMcuPageLimit(int pages) { _mcu_page_limit = pages; }
+    /// 续算保留状态，完成后归还行与脚注工作集。/ Resume retained state and release lines/notes upon completion.
+    bool continueMcuPages(int pages);
+    bool mcuPagesComplete() const { return _mcu_page_context == NULL; }
+#endif
     bool isBeingParsed() { return _parsing; }
     /// renders (formats) document in memory: returns true if re-rendering needed, false if not
     virtual bool render( LVRendPageList * pages, LVDocViewCallback * callback, int width, int dy,

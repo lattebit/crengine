@@ -14,7 +14,7 @@
 #include <vector>
 #include <memory>
 #include <cstring>
-static std::unique_ptr<LVDocView> load(const std::string &path, int pixels, EpubIndex *index = nullptr, int chapter = -1, bool metadata = false) {
+static std::unique_ptr<LVDocView> load(const std::string &path, int pixels, EpubIndex *index = nullptr, int chapter = -1, bool metadata = false, int initial_pages = 0) {
     auto view = std::make_unique<LVDocView>();
     view->setBackgroundColor(0xffffff); view->setTextColor(0);
     view->setDefaultFontFace(lString8("mcu-test"));
@@ -25,6 +25,7 @@ static std::unique_ptr<LVDocView> load(const std::string &path, int pixels, Epub
     view->Resize(480, 640);
     view->setStyleSheet(lString8(cre_styles::html) + "body { margin: 0; } p { margin: 0 0 0.5em 0; } h1 { font-size: 1.5em; page-break-before: auto; } h2 { font-size: 1.2em; } pre { white-space: pre; } table { border-collapse: collapse; } td, th { padding: 4px; border: 1px solid black; }");
     if (!view->LoadDocument(path.c_str(), metadata)) { std::fprintf(stderr, "load failed: %s\n", path.c_str()); std::abort(); }
+    view->getDocument()->setMcuPageLimit(initial_pages);
     if (!metadata) { view->Render(); assert(view->getPageCount() > 0); }
     return view;
 }
@@ -47,7 +48,28 @@ int main(int argc, char **argv) {
         auto image = draw(*view, 0); size_t ink = 0;
         for (auto value : image) ink += value < 128;
         assert(ink > 100 && ink < image.size() / 2);
+        auto partial = load(std::string(argv[2]) + "/fixture." + extension, 24, nullptr, -1, false, 1);
+        auto first = draw(*partial, 0);
+        for (int page = 0; page < view->getPageCount(); ++page) {
+            partial->getDocument()->continueMcuPages(page + 1);
+            assert(draw(*partial, 0) == first && draw(*partial, page) == draw(*view, page));
+        }
+        assert(partial->getDocument()->continueMcuPages(0) && partial->getPageCount() == view->getPageCount());
         std::printf("%s pages=%d ink=%zu\n", extension, view->getPageCount(), ink);
+    }
+    {
+        // 中文：浮动、负边距、列表、跨页表格及延后脚注必须与完整分页逐像素一致。
+        // English: Floats, negative margins, lists, spanning tables and deferred notes must match complete pagination pixel for pixel.
+        auto path = std::string(argv[2]) + "/pagination.html";
+        auto full = load(path, 24), partial = load(path, 24, nullptr, -1, false, 1);
+        assert(!partial->getDocument()->mcuPagesComplete());
+        auto first = draw(*partial, 0);
+        for (int page = 0; page < full->getPageCount(); ++page) {
+            partial->getDocument()->continueMcuPages(page + 1);
+            assert(draw(*partial, 0) == first);
+            assert(draw(*partial, page) == draw(*full, page));
+        }
+        assert(partial->getDocument()->continueMcuPages(0) && partial->getPageCount() == full->getPageCount());
     }
     {
         std::string path = std::string(argv[2]) + "/fixture.epub";

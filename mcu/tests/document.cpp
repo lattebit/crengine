@@ -29,6 +29,14 @@ int main(int argc, char **argv) {
         assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
         assert(state.pages > 1 && state.anchor.path[0]);
         auto first = image; size_t ink = 0; for (auto value : image) ink += value != 255;
+        uint32_t confirmed = state.pages, complete = state.complete;
+        assert(cre_document_extend(document, confirmed + 1, &confirmed, &complete) == CRE_OK && image == first);
+        if (!complete) {
+            platform.cancel_at = platform.checkpoints + 2;
+            assert(cre_document_extend(document, 0, &confirmed, &complete) == CRE_CANCELLED && image == first);
+            platform.cancel_at = SIZE_MAX;
+            assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK && image == first);
+        }
         std::fprintf(stderr, "%s pages=%u ink=%zu\n", extension, state.pages, ink); assert(ink > 100 && ink < image.size() / 2);
         assert(cre_document_prepare(document, &anchor, 1, image.data(), image.size(), &state) == CRE_OK);
         auto second = image;
