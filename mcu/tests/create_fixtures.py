@@ -66,3 +66,19 @@ for codec in ('utf-8', 'utf-16-le', 'utf-16-be'):
             book.writestr(item.filename, data, compress_type=zipfile.ZIP_STORED if item.filename == 'mimetype' else zipfile.ZIP_DEFLATED)
 
 (out / "line-height.html").write_text('<html><body>' + '<p>ABC</p>' * 80 + '</body></html>')
+
+# 中文：跨多个解压块的跳读覆盖图片大 APP 段及随机访问。
+# English: Multi-block seeks cover large image APP segments and random access.
+with zipfile.ZipFile(out / 'seek.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr('bytes.bin', bytes((i * 37 + i // 251) & 255 for i in range(300000)))
+
+(out / 'svg.html').write_text('<html><body><p><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="128" height="96" viewBox="0 0 32 24"><image width="32" height="24" xlink:href="image.png"/></svg></p></body></html>')
+
+with zipfile.ZipFile(out / 'seek-short.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr('bytes.bin', b'abc')
+data = bytearray((out / 'seek-short.zip').read_bytes())
+struct.pack_into('<I', data, 22, 300000)
+struct.pack_into('<I', data, data.index(b'PK\x01\x02') + 24, 300000)
+(out / 'seek-short.zip').write_bytes(data)
+
+(out / 'inline-symbol.html').write_text('<html><head><style>img.symbol { height: 1em; }</style></head><body><p>AB<img class="symbol" src="image.png"/>CD</p></body></html>')

@@ -90,6 +90,10 @@ int load(cre_document &d, uint32_t chapter) {
     // 中文：自定义模式的 CSS 已包含行高，不能再乘一次全局行距。
     // English: Custom CSS already specifies line height; avoid applying the global multiplier twice.
     props->setInt(PROP_INTERLINE_SPACE, d.layout.override_style ? 100 : d.layout.line_percent); props->setInt(PROP_FONT_BASE_WEIGHT, d.layout.weight);
+    // 中文：图片尺寸遵循书内 CSS；不能再次放大行星符号、注释图标等行内小图。
+    // English: Honor authored image sizes without enlarging inline planetary symbols or note icons again.
+    props->setInt(PROP_IMG_SCALING_ZOOMIN_INLINE_MODE, 0);
+    props->setInt(PROP_IMG_SCALING_ZOOMIN_BLOCK_MODE, 0);
     view->propsApply(props);
     char css[512];
     std::snprintf(css, sizeof(css), "body { margin: 0; } p { margin: 0 0 %.2fem 0; text-indent: %uem; }", d.layout.paragraph_quarters / 4.0, unsigned(d.layout.indent));

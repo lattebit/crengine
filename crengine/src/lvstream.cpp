@@ -2273,7 +2273,7 @@ private:
         if (m_inpos >= m_packsize || m_zstream.avail_in >= (ARC_INBUF_SIZE / 2))
             return true;
         if (m_zstream.avail_in)
-            memcpy(m_inbuf, m_zstream.next_in, m_zstream.avail_in);
+            memmove(m_inbuf, m_zstream.next_in, m_zstream.avail_in);
         m_zstream.next_in = m_inbuf;
         lvsize_t count = ARC_INBUF_SIZE - m_zstream.avail_in;
         if (m_stream->Read(m_inbuf + m_zstream.avail_in, count, &count) != LVERR_OK)
@@ -2338,17 +2338,16 @@ private:
 
         return true;
     }
-    /// skip bytes from out stream
-    bool skip( int bytesToSkip )
+    // 中文：目标是绝对解压位置；旧缓冲区不能再次计入向前跳读的距离。
+    // English: Seek to an absolute decoded position; never count the old buffer twice when advancing.
+    bool decodeTo(lvpos_t position)
     {
-        for ( ; ; ) {
-            int avail = getAvailBytes();
-            if (avail >= bytesToSkip)
-                return true;
-            bytesToSkip -= avail;
-            if (!decodeNext())
+        while (position > m_zstream.total_out) {
+            auto before = m_zstream.total_out;
+            if (!decodeNext() || m_zstream.total_out <= before)
                 return false;
         }
+        return true;
     }
 public:
 
@@ -2400,11 +2399,11 @@ public:
             return LVERR_FAIL;
 
         if (abspos > m_zstream.total_out) {
-            if (!skip(abspos - m_zstream.total_out))
+            if (!decodeTo(abspos))
                 return LVERR_FAIL;
         }
         else if (abspos < m_outpos) {
-            if (!rewind() || !skip(abspos))
+            if (!rewind() || !decodeTo(abspos))
                 return LVERR_FAIL;
         }
 
@@ -2420,33 +2419,30 @@ public:
     }
     virtual lverror_t Read(void* buf, lvsize_t count, lvsize_t* bytesRead)
     {
-        if (!m_zInitialized)
+        if (bytesRead) *bytesRead = 0;
+        if (!m_zInitialized || m_pos > m_unpacksize || (!buf && count))
             return LVERR_FAIL;
-
-        if ((m_pos + count) > m_unpacksize)
+        if (count > m_unpacksize - m_pos)
             count = m_unpacksize - m_pos;
-
-        lUInt8 * ptr = (lUInt8 *)buf;
-        lUInt8 * end = ptr + count;
-
-        for ( ; ; ) {
-            int offset = m_pos - m_outpos;
-            int avail = getAvailBytes() - offset;
-            if ((ptr + avail) > end)
-                avail = end - ptr;
-            memcpy(ptr, m_outbuf + offset, avail);
-            m_pos += avail;
-            ptr += avail;
-            if (ptr >= end)
+        auto *ptr = static_cast<lUInt8 *>(buf);
+        lvsize_t actual = 0;
+        while (actual < count) {
+            if (m_pos < m_outpos || m_pos > m_zstream.total_out)
                 break;
-            if (!decodeNext())
-                break;
+            lvsize_t offset = m_pos - m_outpos;
+            lvsize_t avail = m_zstream.total_out - m_pos;
+            if (!avail) {
+                auto before = m_zstream.total_out;
+                if (!decodeNext() || m_zstream.total_out <= before)
+                    break;
+                continue;
+            }
+            if (avail > count - actual) avail = count - actual;
+            memcpy(ptr + actual, m_outbuf + offset, avail);
+            m_pos += avail; actual += avail;
         }
-
-        if (bytesRead)
-            *bytesRead = ptr - (lUInt8 *)buf;
-
-        return ptr != end ? LVERR_FAIL : LVERR_OK;
+        if (bytesRead) *bytesRead = actual;
+        return actual == count ? LVERR_OK : LVERR_FAIL;
     }
     virtual lverror_t SetSize(lvsize_t)
     {

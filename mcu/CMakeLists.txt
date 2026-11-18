@@ -72,6 +72,11 @@ target_link_libraries(crengine_mcu PUBLIC cre_freetype cre_harfbuzz cre_fribidi
 set_target_properties(crengine_mcu PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    add_executable(cre_mcu_zip_test tests/zip.cpp)
+    target_link_libraries(cre_mcu_zip_test PRIVATE crengine_mcu)
+    target_compile_options(cre_mcu_zip_test PRIVATE -UNDEBUG)
+    add_test(NAME mcu_zip COMMAND cre_mcu_zip_test "${CMAKE_CURRENT_BINARY_DIR}/fixtures/seek.zip")
+    set_tests_properties(mcu_zip PROPERTIES FIXTURES_REQUIRED document_fixtures)
     add_executable(cre_mcu_image_test tests/image.cpp)
     target_link_libraries(cre_mcu_image_test PRIVATE crengine_mcu)
     target_compile_options(cre_mcu_image_test PRIVATE -UNDEBUG)

@@ -140,7 +140,20 @@ int main(int argc, char **argv) {
         cre_document_close(document); assert(!platform.files);
     }
     {
-        cre_document *document = nullptr; auto path = std::string(argv[2]) + "/image.html";
+        // 中文：1em 行内图片应与 24px 字号等高，不能被旧式图片放大选项翻倍。
+        // English: A 1em inline image matches the 24px font size without legacy image zoom doubling it.
+        cre_document *document = nullptr; auto path = std::string(argv[2]) + "/inline-symbol.html";
+        assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
+        cre_anchor anchor{}; cre_page_state state{};
+        assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
+        size_t count = 0; auto hits = cre_document_hits(document, &count);
+        assert(count == 1 && hits[0].image && hits[0].width == 32);
+        assert(std::count(image.begin(), image.end(), uint8_t(0x44)) >= 31 * 24 / 2);
+        assert(std::count(image.begin(), image.end(), uint8_t(0x44)) <= 32 * 24 / 2);
+        cre_document_close(document); assert(!platform.files);
+    }
+    for (const char *name : {"image.html", "svg.html"}) {
+        cre_document *document = nullptr; auto path = std::string(argv[2]) + "/" + name;
         assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
         cre_anchor anchor{}; cre_page_state state{};
         assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);

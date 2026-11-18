@@ -5,6 +5,10 @@
  */
 #include "cre_mcu_internal.h"
 #include "lvimg.h"
+#include "lvtinydom.h"
+#include "fb2def.h"
+#include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <memory>
 
@@ -91,4 +95,35 @@ LVImageSource *cre_mcu_image_source(LVStreamRef stream, ldomDocument *doc, ldomN
     auto image = std::make_unique<Image>(stream, doc, node);
     if (!image->probe()) return nullptr;
     return image.release();
+}
+
+// 中文：全画布单张图片的 SVG 包装复用灰阶解码；复杂图形继续交给矢量后端。
+// English: Full-canvas single-image SVG wrappers reuse grayscale decoding; complex graphics retain the vector backend.
+ldomNode *cre_mcu_svg_image_node(ldomNode *node) {
+    if (!node || node->getNodeId() != el_svg) return nullptr;
+    ldomNode *image = nullptr;
+    for (int i = 0; i < node->getChildCount(); ++i) {
+        auto *child = node->getChildNode(i);
+        if (child->isText() && child->isWhitespaceText()) continue;
+        if (!child->isElement() || child->getNodeId() != el_image || image) return nullptr;
+        image = child;
+    }
+    if (!image) return nullptr;
+    auto aspect = image->getAttributeValue("preserveAspectRatio");
+    if (!aspect.empty() && aspect != U"xMidYMid meet") return nullptr;
+    for (auto *part : {node, image}) for (const char *attribute : {"transform", "clip-path", "mask", "opacity", "style"})
+        if (!part->getAttributeValue(attribute).empty()) return nullptr;
+    for (const char *attribute : {"x", "y"}) {
+        auto value = image->getAttributeValue(attribute);
+        if (!value.empty() && value != U"0" && value != U"0px") return nullptr;
+    }
+    auto viewbox = UnicodeToUtf8(node->getAttributeValue("viewBox"));
+    double x, y, w, h; char extra;
+    if (std::sscanf(viewbox.c_str(), "%lf %lf %lf %lf %c", &x, &y, &w, &h, &extra) != 4 || x != 0 || y != 0 ||
+        !std::isfinite(w) || !std::isfinite(h) || w <= 0 || h <= 0) return nullptr;
+    for (const char *attribute : {"width", "height"}) {
+        auto value = UnicodeToUtf8(image->getAttributeValue(attribute)); double size;
+        if (std::sscanf(value.c_str(), "%lf %c", &size, &extra) != 1 || size != (attribute[0] == 'w' ? w : h)) return nullptr;
+    }
+    return image;
 }

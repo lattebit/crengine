@@ -15,6 +15,9 @@
 #include "crsetup.h"
 #ifdef CR_MCU
 #include "cre_mcu_internal.h"
+#include <algorithm>
+#include <cmath>
+#include <memory>
 #endif
 
 #include <stdlib.h>
@@ -1810,6 +1813,9 @@ public:
     LVSvgImageSource( ldomNode * node, LVStreamRef stream );
     virtual ~LVSvgImageSource();
     virtual void   Compact();
+#if CR_MCU
+    bool IsScalable() const override { return true; }
+#endif
     virtual bool   Decode( LVImageDecoderCallback * callback );
     int DecodeFromBuffer(const unsigned char *buf, int buf_size, LVImageDecoderCallback * callback);
     static bool CheckPattern( const lUInt8 * buf, int len );
@@ -1845,7 +1851,14 @@ bool LVSvgImageSource::Decode( LVImageDecoderCallback * callback )
         return false;
     const lvsize_t sz = _stream->GetSize();
     // if ( sz<32 || sz>0x80000 ) return false; // do not impose (yet) a max size for svg
+#if CR_MCU
+    if (sz > 2u * 1024 * 1024) return false;
+    std::unique_ptr<lUInt8, decltype(&cre_mcu_release)> storage(static_cast<lUInt8 *>(cre_mcu_allocate(sz + 1)), cre_mcu_release);
+    if (!storage) throw CreMcuFailure{CRE_MEMORY};
+    lUInt8 *buf = storage.get();
+#else
     lUInt8 * __restrict buf = new lUInt8[ sz+1 ];
+#endif
     lvsize_t bytesRead = 0;
     bool res = true;
     _stream->SetPos(0);
@@ -1856,12 +1869,49 @@ bool LVSvgImageSource::Decode( LVImageDecoderCallback * callback )
         buf[sz] = 0;
         res = DecodeFromBuffer( buf, sz, callback );
     }
+#if !CR_MCU
     delete[] buf;
+#endif
     return res;
 }
 
 int LVSvgImageSource::DecodeFromBuffer(const unsigned char *buf, int buf_size, LVImageDecoderCallback * callback)
 {
+#if CR_MCU
+    (void)buf_size;
+    cre_mcu_checkpoint();
+    std::unique_ptr<NSVGimage, decltype(&nsvgDelete)> image(nsvgParse((char *)buf, "px", 96.0f), nsvgDelete);
+    if (!image || !image->shapes || !std::isfinite(image->width) || !std::isfinite(image->height) ||
+        image->width <= 0 || image->height <= 0 || image->width > 1000000 || image->height > 1000000) return false;
+    _width = int(image->width) + 2; _height = int(image->height) + 2;
+    if (!callback) return true;
+    int width = _width, height = _height; (void)callback->GetTargetSize(width, height);
+    if (width <= 0 || height <= 0 || width > 2048 || height > 2048) return false;
+    std::unique_ptr<NSVGrasterizer, decltype(&nsvgDeleteRasterizer)> raster(nsvgCreateRasterizer(), nsvgDeleteRasterizer);
+    if (!raster) throw CreMcuFailure{CRE_MEMORY};
+    // 中文：只分配八行 RGBA 临时条带，不为 SVG 分配整页彩色缓冲。
+    // English: Allocate eight temporary RGBA rows instead of a full-page color bitmap.
+    constexpr int rows = 8;
+    std::unique_ptr<lUInt8, decltype(&cre_mcu_release)> band(static_cast<lUInt8 *>(cre_mcu_allocate(size_t(width) * rows * 4)), cre_mcu_release);
+    std::unique_ptr<lUInt32, decltype(&cre_mcu_release)> line(static_cast<lUInt32 *>(cre_mcu_allocate(size_t(width) * 4)), cre_mcu_release);
+    if (!band || !line) throw CreMcuFailure{CRE_MEMORY};
+    float scale = std::min(float(width) / _width, float(height) / _height);
+    callback->OnStartDecode(this);
+    try {
+        for (int top = 0; top < height; top += rows) {
+            cre_mcu_checkpoint(); int count = std::min(rows, height - top);
+            nsvgRasterize(raster.get(), image.get(), scale, scale - top, scale, band.get(), width, count, width * 4);
+            for (int y = 0; y < count; ++y) {
+                const lUInt8 *source = band.get() + size_t(y) * width * 4;
+                for (int x = 0; x < width; ++x, source += 4)
+                    line.get()[x] = (lUInt32(255 - source[3]) << 24) | (lUInt32(source[0]) << 16) | (lUInt32(source[1]) << 8) | source[2];
+                if (!callback->OnLineDecoded(this, top + y, line.get())) { callback->OnEndDecode(this, true); return false; }
+            }
+        }
+    } catch (...) { callback->OnEndDecode(this, true); throw; }
+    callback->OnEndDecode(this, false); return true;
+#else
+
     NSVGimage *image = NULL;
     NSVGrasterizer *rast = NULL;
     unsigned char* __restrict img = NULL;
@@ -1941,6 +1991,7 @@ int LVSvgImageSource::DecodeFromBuffer(const unsigned char *buf, int buf_size, L
     nsvgDeleteRasterizer(rast);
     nsvgDelete(image);
     return res;
+#endif
 }
 
 #if (USE_STB_IMAGE==1)
@@ -2362,6 +2413,9 @@ LVImageSourceRef LVCreateStreamImageSource( LVStreamRef stream, ldomDocument * d
     LVImageSourceRef ref;
     if ( stream.isNull() )
         return ref;
+#if CR_MCU
+    if (auto *image = cre_mcu_svg_image_node(node)) return image->getObjectImageSource();
+#endif
     lUInt8 hdr[256];
     lvsize_t bytesRead = 0;
     if ( stream->Read( hdr, 256, &bytesRead )!=LVERR_OK )

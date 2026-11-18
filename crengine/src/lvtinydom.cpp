@@ -22321,6 +22321,9 @@ lString32 ldomNode::getObjectImageRefName(bool percentDecode)
 {
     if (!isElement())
         return lString32::empty_str;
+#if CR_MCU
+    if (auto *image = cre_mcu_svg_image_node(this)) return image->getObjectImageRefName(percentDecode);
+#endif
     //printf("ldomElement::getObjectImageSource() ... ");
     if (!isImage())
         return lString32::empty_str;

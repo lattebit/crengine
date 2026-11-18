@@ -45,6 +45,9 @@ EPUB XHTML/HTML/CSS source bytes are independent of fonts/layout and share a bou
 
 JPEG/PNG dimensions are probed from streams. The optional `decode_image` callback returns contiguous grayscale bytes through the supplied budgeted allocator. The port emits target-sized rows without a full color bitmap; `cre_document_image` prepares a resource without advancing the body anchor.
 
+简单的全画布 SVG 图片包装复用同一灰阶图片后端；矢量 SVG 按目标尺寸使用八行 RGBA 临时条带。书内 CSS 决定图片大小，端口关闭额外的旧式图片放大，避免行内符号被放大两次。压缩资源的跳读以绝对解压位置推进，截断流返回失败。
+Simple full-canvas SVG image wrappers reuse the grayscale decoder; vector SVG uses eight temporary RGBA rows at the target size. Authored CSS determines image dimensions, with legacy extra zoom disabled to avoid doubling inline symbols. Compressed-resource seeks advance to absolute decoded positions and fail on truncated streams.
+
 ## 裁剪与维护 / Trimming and maintenance
 
 `crsetup.h.in` 关闭系统字体发现、mmap、信号处理、彩色整页后备缓冲和桌面路径；源文件列表排除办公与旧格式导入器。JPEG/PNG/WebP/GIF 的上游软件库不参与本入口，平台图像接入必须单独提供。字体后端保留 TrueType/CFF/SFNT、HarfBuzz 整形与灰阶光栅，关闭原生 hinting、autohint、彩色字体和压缩字体容器。
