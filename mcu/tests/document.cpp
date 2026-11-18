@@ -34,6 +34,16 @@ int main(int argc, char **argv) {
     assert(cre_mcu_initialize(&cfg) == CRE_OK);
     cre_layout layout{480, 640, 24, 400, 12, 100, 2, 0, 0, {}, 12};
     std::strcpy(layout.font, argv[1]); std::vector<uint8_t> image(480 * 640 / 2);
+    const char *languages[] = {"ja", "", "ja", "ja", "en", "ja", "", "ja", "en-US", "en-GB"};
+    for (unsigned i = 0; i < sizeof(languages) / sizeof(*languages); ++i) {
+        cre_document *document = nullptr;
+        std::string path = std::string(argv[2]) + "/language-" + std::to_string(i) + ".epub";
+        assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
+        cre_metadata data{}; assert(cre_document_metadata(document, &data) == CRE_OK);
+        if (std::strcmp(data.language, languages[i])) std::fprintf(stderr, "language case=%u expected=%s actual=%s\n", i, languages[i], data.language);
+        assert(!std::strcmp(data.language, languages[i]));
+        cre_document_close(document); assert(!platform.files);
+    }
     {
         Sources sources; cre_source_cache cache{&sources, Sources::read, Sources::write};
         auto path = std::string(argv[2]) + "/fixture.epub"; std::vector<uint8_t> original;

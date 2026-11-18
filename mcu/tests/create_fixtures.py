@@ -82,3 +82,25 @@ struct.pack_into('<I', data, data.index(b'PK\x01\x02') + 24, 300000)
 (out / 'seek-short.zip').write_bytes(data)
 
 (out / 'inline-symbol.html').write_text('<html><head><style>img.symbol { height: 1em; }</style></head><body><p>AB<img class="symbol" src="image.png"/>CD</p></body></html>')
+
+# 中文：首条 Dublin Core 语言按实际命名空间选择，不按前缀拼写猜测。
+# English: Select the first Dublin Core language by its namespace, not its prefix spelling.
+languages = [
+    ('<dc:language>ja</dc:language><dc:language>en</dc:language>', 'ja'),
+    ('<dc:language/><dc:language>en</dc:language>', ''),
+    ('<other:language xmlns:other="urn:other">en</other:language><dc:language>ja</dc:language>', 'ja'),
+    ('<language xmlns="http://purl.org/dc/elements/1.1/">ja</language>', 'ja'),
+    ('<alt:language xmlns:alt="http://purl.org/dc/elements/1.1/">en</alt:language>', 'en'),
+    ('<dc:language xmlns:dc="urn:other">en</dc:language><dc:language>ja</dc:language>', 'ja'),
+    ('<other:language xmlns:other="urn:other">en</other:language>', ''),
+    ('<meta><dc:language>en</dc:language></meta><dc:language>ja</dc:language>', 'ja'),
+    ('<dc:language>en<![CDATA[-US]]></dc:language>', 'en-US'),
+    ('<dc:language>en&#45;GB</dc:language>', 'en-GB'),
+]
+for i, (metadata, expected) in enumerate(languages):
+    with zipfile.ZipFile(out / 'fixture.epub') as source, zipfile.ZipFile(out / f'language-{i}.epub', 'w', zipfile.ZIP_DEFLATED) as book:
+        for item in source.infolist():
+            data = source.read(item)
+            if item.filename.endswith('.opf'):
+                data = data.replace(b'<dc:language>zh</dc:language>', metadata.encode())
+            book.writestr(item, data)

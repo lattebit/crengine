@@ -8,6 +8,34 @@
 #include <zlib.h>
 #endif
 
+#if CR_MCU
+// 中文：语言用于字体策略；解析实际命名空间，忽略同名扩展元素并保留首项为空的语义。
+// English: Language drives font policy; resolve namespaces, ignore extension elements and retain an empty first value.
+static lString32 mcuPrimaryLanguage(ldomDocument *doc) {
+    ldomNode *metadata = doc->nodeFromXPath(cs32("package/metadata"));
+    if (!metadata) return lString32::empty_str;
+    for (int i = 0; i < metadata->getChildCount(); ++i) {
+        auto *node = metadata->getChildNode(i);
+        if (!node->isElement() || node->getNodeName() != U"language") continue;
+        const auto &prefix = node->getNodeNsName();
+        lString32 uri; bool declared = false;
+        for (auto *scope = node; scope && !declared; scope = scope->getParentNode()) {
+            for (int a = 0; a < scope->getAttrCount(); ++a) {
+                const auto *attribute = scope->getAttribute(a);
+                const auto &ns = doc->getNsName(attribute->nsid);
+                const auto &name = scope->getAttributeName(a);
+                if ((prefix.empty() && ns.empty() && name == U"xmlns") ||
+                    (!prefix.empty() && ns == U"xmlns" && name == prefix)) {
+                    uri = scope->getAttributeValue(attribute->nsid, attribute->id); declared = true; break;
+                }
+            }
+        }
+        if (uri == U"http://purl.org/dc/elements/1.1/" || (!declared && prefix.empty())) return node->getText();
+    }
+    return lString32::empty_str;
+}
+#endif
+
 class EpubItem {
 public:
     lString32 href;
@@ -1224,7 +1252,11 @@ bool ImportEpubDocument( LVStreamRef stream, ldomDocument * m_doc, LVDocViewCall
         CRPropRef m_doc_props = m_doc->getProps();
         // These are expected to be single, so pick the first one met
         lString32 title = doc->textFromXPath( cs32("package/metadata/title"));
+#if CR_MCU
+        lString32 language = mcuPrimaryLanguage(doc);
+#else
         lString32 language = doc->textFromXPath( cs32("package/metadata/language"));
+#endif
         lString32 description = doc->textFromXPath( cs32("package/metadata/description"));
         pageMapSource = doc->textFromXPath( cs32("package/metadata/source"));
         m_doc_props->setString(DOC_PROP_TITLE, title);

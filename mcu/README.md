@@ -43,6 +43,9 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 
 EPUB XHTML/HTML/CSS source bytes are independent of fonts/layout and share a bounded cache: eight entries, 512 KiB total, 256 KiB per entry. Oversized resources retain direct ZIP streaming. Source bytes use the tracked allocation budget, and readers pin their entries. `cre_document_source_cache` attaches host persistence; only explicit `cre_document_checkpoint` calls write dirty entries, retaining failures for retry. Layout changes preserve source data.
 
+EPUB 的主语言只读取元数据下第一条 Dublin Core 语言，按命名空间 URI 识别并保留首条为空的语义。
+Read only the first Dublin Core language directly under EPUB metadata, resolving namespace URIs and retaining an empty first value.
+
 `margin` controls the top and both sides; `bottom_margin` is independent, with zero reserving no extra space below the last complete line.
 
 JPEG/PNG dimensions are probed from streams. The optional `decode_image` callback returns contiguous grayscale bytes through the supplied budgeted allocator. The port emits target-sized rows without a full color bitmap; `cre_document_image` prepares a resource without advancing the body anchor.
