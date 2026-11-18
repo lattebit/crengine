@@ -31,6 +31,8 @@ typedef struct {
 } cre_mcu_bitmap;
 /// 顺序或定位读取解包后的资源；返回 CRE 错误码。/ Read an unpacked resource sequentially or by offset, returning a CRE status.
 typedef int (*cre_mcu_resource_read)(void *, uint64_t, void *, size_t);
+/// 布局记录由宿主按文档源和构建身份隔离；所有缓存回调仅在同一工作任务执行。
+/// Hosts isolate layout records by source and build identity; all cache callbacks run on the same worker.
 typedef struct {
     void *context; ///< 平台上下文 / Platform context
     void *(*allocate)(void *, size_t); ///< PSRAM 优先，返回自然对齐地址 / Prefer PSRAM and return naturally aligned storage
@@ -44,6 +46,9 @@ typedef struct {
     int (*decode_image)(void *, const uint8_t *, size_t, uint32_t, uint32_t,
                         const cre_mcu_image_memory *, cre_mcu_bitmap *); ///< 可选宿主 JPEG/PNG 解码，必须使用给定分配器 / Optional host JPEG/PNG decoding using the supplied allocator
     int (*cache_font)(void *, const char *, uint64_t, cre_mcu_resource_read, void *, char *, size_t); ///< 可选流式字体落盘；CRE_BUSY 表示缓存不可用 / Optional streamed font extraction; CRE_BUSY means cache unavailable
+    int (*read_layout)(void *, uint64_t, void *, size_t, size_t *); ///< 可选有界布局记录读取，命中返回非零 / Optional bounded layout-record read; nonzero on hit
+    int (*write_layout)(void *, uint64_t, const void *, size_t); ///< 可选原子布局记录写入，成功返回非零 / Optional atomic layout-record write; nonzero on success
+    void (*remove_layout)(void *, uint64_t); ///< 可选提交后回收，失败可留待清理 / Optional post-commit removal; failures may await eviction
 } cre_mcu_platform_t;
 typedef struct {
     size_t used, peak, limit; ///< 当前、峰值和预算字节 / Current, peak and budget bytes

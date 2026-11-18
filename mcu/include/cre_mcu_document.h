@@ -16,7 +16,8 @@ typedef struct {
 } cre_source_cache;
 /// 源缓存与排版无关；回调只在工作任务执行，不得抛异常。/ Layout-independent source cache; callbacks run on the worker and must not throw.
 int cre_document_source_cache(cre_document *document, const cre_source_cache *cache);
-/// 只在显式检查点持久化近期源；失败保留可重试脏项。/ Persist recent sources at explicit checkpoints; retain failed dirty entries for retry.
+/// 显式持久化近期源与可恢复布局，不保存像素；失败不破坏上次提交。
+/// Explicitly persist recent sources and resumable layout without pixels; failures preserve the previous commit.
 int cre_document_checkpoint(cre_document *document);
 /// 预读邻章源，不创建布局或改变当前页；容量不足跳过，取消仍返回错误。/ Prefetch chapter source without layout or page changes; skip when full and report cancellation.
 int cre_document_prefetch(cre_document *document, uint32_t chapter);

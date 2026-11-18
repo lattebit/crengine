@@ -116,8 +116,8 @@ Typography tests inspect real character positions across thirteen widths for ope
 EPUB 资源表和阅读顺序各最多 32768 项，解析时在建立下一节点前拒绝超限输入。边界测试同时检查上限、超限清理与随后重开。这是条目数限制，不代表上限规模在 MCU 内存中一定可用。
 EPUB manifests and spines admit at most 32768 entries each, rejecting excess input before creating the next node. Boundary tests cover the limit, rejected-document cleanup and reopening. This entry-count limit does not guarantee that a document at the limit fits MCU memory.
 
-分页器可分别序列化固定行几何与续算游标，脚注及别名引用使用索引，恢复前校验摘要、长度和引用范围。测试在每次恢复后对照完整分页，并覆盖损坏、截断、取消、非线性流及跨页脚注。这是持久布局的基础机制，当前文档服务尚未接入磁盘布局恢复。
-The paginator serializes fixed line geometry separately from its continuation cursor, encoding footnotes and aliases as indices. Restoration validates checksums, lengths and reference ranges. Tests compare every restored run against complete pagination, including corruption, truncation, cancellation, nonlinear flows and spanning footnotes. This is groundwork for persistent layout; the document service does not yet restore disk layouts.
+分页器可分别序列化固定行几何与续算游标，脚注及别名引用使用索引，恢复前校验摘要、长度和引用范围。测试在每次恢复后对照完整分页，并覆盖损坏、截断、取消、非线性流及跨页脚注。C 端口通过可选的布局记录回调接入宿主持久化。
+The paginator serializes fixed line geometry separately from its continuation cursor, encoding footnotes and aliases as indices. Restoration validates checksums, lengths and reference ranges. Tests compare every restored run against complete pagination, including corruption, truncation, cancellation, nonlinear flows and spanning footnotes. The C port connects optional layout-record callbacks to host persistence.
 
 Linux sanitizer 构建额外传入以下三个选项，然后运行相同 CTest：
 For Linux sanitizer builds, add these options and run the same CTest suite:
@@ -133,3 +133,9 @@ Retain upstream licenses for dependencies and generated tables. Static firmware 
 
 使用可变字体重复同一故障矩阵：`build/mcu-test/cre_mcu_font_test /path/to/variable.ttf variable`。
 Repeat the fault matrix with a variable font using the command above.
+
+布局缓存以 16 KiB 不可变块和最后发布的根记录保存 DOM、行几何与分页续算状态，不保存像素。单个逻辑布局文件上限 64 MiB；工作流使用一个块缓冲和至多 4096 个块键，计入受管预算。恢复按需校验块，不扫描目录或整个逻辑文件；目前页目录仍一次解码，尚不是逐页懒加载。布局键覆盖章节、全部排版选项、字体路径/长度/首尾 4 KiB 和构建身份；宿主还须按文档源身份隔离记录。相同元数据及首尾块的中部字体修改需要主动失效缓存。
+Layout caches persist DOM, line geometry and pagination continuation as immutable 16 KiB blocks and a root published last, excluding pixels. Each logical layout file is limited to 64 MiB; one block buffer and at most 4096 keys count against managed memory. Restore validates blocks on access without scanning directories or the whole logical file. The page directory is still decoded as a whole, not lazily per page. Keys include chapter, all typography fields, font path/length/first and last 4 KiB, and build identity; hosts must additionally isolate records by source identity. A middle-only font change with identical metadata and endpoint blocks requires explicit invalidation.
+
+只有 `cre_document_checkpoint` 发布根，成功后才回收旧块。读盘损坏会在打开或准备页面时重新从源加载一次；取消和内存错误不自动重试。写入失败丢弃工作布局，下一次准备从源重建，宿主已借用的像素保持不变。单个布局键只能有一个活动写入者；回调不得抛异常，返回写入失败时也可能已完成激活，因此不能提前删除新块。
+Only `cre_document_checkpoint` publishes a root, reclaiming old blocks after success. Cache corruption during open or page preparation retries once from source; cancellation and memory failures do not retry. Write failure discards the working layout for reconstruction on the next preparation, preserving pixels already borrowed by the host. Each layout key permits one active writer. Callbacks must not throw; a reported write failure may occur after activation, so new blocks must not be removed prematurely.

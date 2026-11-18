@@ -15,6 +15,8 @@ struct CreMcuFailure { int code; };
 void cre_mcu_checkpoint();
 void cre_mcu_reset_error();
 int cre_mcu_error();
+/// C 风格清理路径保留失败原因，外层请求统一返回。/ Retain errors across C-style cleanup paths for the outer request boundary.
+void cre_mcu_record_error(int code);
 FT_Error cre_mcu_new_library(FT_Library *out);
 FT_Error cre_mcu_new_face(FT_Library library, const char *path, FT_Long index, FT_Face *out);
 /// 嵌入字体共用有界读取缓存，不保留整份文件。/ Embedded fonts share bounded reads without retaining the entire file.
@@ -33,3 +35,7 @@ ldomNode *cre_mcu_svg_image_node(ldomNode *node);
 LVImageSource *cre_mcu_svg_image_source(ldomNode *node);
 LVImageSource *cre_mcu_image_source(LVStreamRef stream, ldomDocument *doc, ldomNode *node);
 int cre_mcu_decode_image(const uint8_t *data, size_t bytes, uint32_t width, uint32_t height, cre_mcu_bitmap *out);
+
+struct CreLayoutRecords;
+/// 当前串行任务的可选布局记录接口。/ Optional layout records for the current serial worker.
+CreLayoutRecords cre_mcu_layout_records();

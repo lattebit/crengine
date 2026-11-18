@@ -12,6 +12,9 @@
  *******************************************************/
 
 #include "crsetup.h"
+#if CR_MCU
+#include "cre_mcu_internal.h"
+#endif
 
 #include "../include/fb2def.h"
 #include "../include/lvdocview.h"
@@ -2419,6 +2422,11 @@ bool LVDocView::goToPage(int page, bool internal, bool updatePosBookmark, bool r
 			res = false;
 		}
 	}
+#if CR_MCU
+    // 中文：先确认新页位置；生成锚点时的 checkPos 不能恢复加载前的旧位置。
+    // English: Confirm the selected page before anchor generation can restore a stale pre-load position.
+    _posIsSet = true;
+#endif
     if (updatePosBookmark) {
         _posBookmark = getBookmark();
     }
@@ -3163,6 +3171,7 @@ void LVDocView::Render(int dx, int dy, LVRendPageList * pages) {
 		updateSelections();
 		CRLog::debug("Render is finished");
 
+#if !CR_MCU
 		if (!m_swapDone) {
 			int fs = m_doc_props->getIntDef(DOC_PROP_FILE_SIZE, 0);
 			int mfs = m_props->getIntDef(PROP_MIN_FILE_SIZE_TO_CACHE,
@@ -3176,6 +3185,8 @@ void LVDocView::Render(int dx, int dy, LVRendPageList * pages) {
                 m_swapDone = true;
             }
 		}
+
+#endif
 
         updateBookMarksRanges();
 	}
@@ -4439,7 +4450,9 @@ void LVDocView::setSourcePath(const lString32 &path) {
 }
 #endif
 bool LVDocView::LoadDocument(LVStreamRef stream, bool metadataOnly) {
-
+#if CR_MCU
+    mcu_cache_loaded = false;
+#endif
 
 	m_swapDone = false;
 
@@ -4517,6 +4530,17 @@ bool LVDocView::LoadDocument(LVStreamRef stream, bool metadataOnly) {
 			if ( m_callback )
                 m_callback->OnLoadFileFormatDetected(doc_format_epub);
             updateDocStyleSheet();
+#if CR_MCU
+            if (!mcu_cache_stream.isNull()) {
+                if (m_epubIndex && m_epubIndex->ready) m_doc->setContainer(m_epubIndex->archive);
+                else {
+                    EpubIndex index; auto metadata = std::make_unique<ldomDocument>();
+                    if (ImportEpubDocument(m_stream, metadata.get(), nullptr, nullptr, true, nullptr, nullptr, nullptr, &index))
+                        m_doc->setContainer(index.archive);
+                }
+                if (restoreMcuLayout()) { m_container = m_doc->getContainer(); m_arc = m_container; return true; }
+            }
+#endif
             // See epubfmt.cpp's ExtractCoverFilenameFromCoverPageFragment()
             // for why we need to pass fb2_elem_table and such.
             bool res = ImportEpubDocument( m_stream, m_doc, m_callback, this, metadataOnly, fb2_elem_table, fb2_attr_table, fb2_ns_table, m_epubIndex, m_epubChapter );
@@ -4722,6 +4746,9 @@ bool LVDocView::LoadDocument(LVStreamRef stream, bool metadataOnly) {
             if (m_callback)
                 m_callback->OnLoadFileFormatDetected(doc_format_md);
             updateDocStyleSheet();
+#if CR_MCU
+            if (restoreMcuLayout()) return true;
+#endif
             bool res = ImportMarkdownDocument(m_stream, stream->GetName(), m_doc, m_callback, this);
             if (!res) {
                 setDocFormat(doc_format_none);
@@ -5044,10 +5071,30 @@ void LVDocView::insertBookmarkPercentInfo(int start_page, int end_y, int percent
 #endif
 }
 
+#if CR_MCU
+bool LVDocView::restoreMcuLayout() {
+    if (mcu_cache_stream.isNull()) return false;
+    auto original = m_doc_props->clone(); auto container = m_doc->getContainer(); auto format = m_doc_format;
+    updateDocStyleSheet();
+    try {
+        if (m_doc->openMcuCache(mcu_cache_stream, this) && cre_mcu_error() == CRE_OK) { mcu_cache_loaded = true; return true; }
+    } catch (const CreMcuFailure &error) {
+        if (error.code == CRE_CANCELLED || error.code == CRE_MEMORY) throw;
+    }
+    if (cre_mcu_error() == CRE_CANCELLED || cre_mcu_error() == CRE_MEMORY) throw CreMcuFailure{cre_mcu_error()};
+    cre_mcu_reset_error();
+    m_doc_props = original; m_doc_format = format; createEmptyDocument(); setRenderProps(0, 0); m_doc->setContainer(container);
+    return false;
+}
+#endif
 bool LVDocView::ParseDocument() {
 
 	createEmptyDocument();
 	setRenderProps(0, 0); // to allow apply styles and rend method while loading
+
+#if CR_MCU
+    if (restoreMcuLayout()) return true;
+#endif
 
 #ifndef CR_MCU
 	if (m_stream->GetSize() > DOCUMENT_CACHING_MIN_SIZE) {

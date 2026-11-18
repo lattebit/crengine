@@ -5,6 +5,9 @@
 #define CR_MCU 1
 #define USE_ZLIB 1
 #define USE_ZSTD 0
+// 中文：内容块按读取验证，不在恢复时扫描整个布局文件。
+// English: Validate content blocks on access without scanning the whole layout at restore.
+#define ENABLE_CACHE_FILE_CONTENTS_VALIDATION 0
 #define DOCUMENT_CACHING_MIN_SIZE 0x10000
 #define DOCUMENT_CACHING_SIZE_THRESHOLD 0x80000
 #define CHM_SUPPORT_ENABLED 0

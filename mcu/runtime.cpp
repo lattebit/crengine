@@ -4,6 +4,7 @@
  * English: Budgeted shared font streams; close on the final reference and isolate preview font selection.
  */
 #include "cre_mcu_internal.h"
+#include "layout_cache.h"
 #include "cre_identity.h"
 #include "lvfntman.h"
 #include "lvdrawbuf.h"
@@ -258,6 +259,7 @@ void cre_mcu_checkpoint() {
 }
 void cre_mcu_reset_error() { io_error = CRE_OK; }
 int cre_mcu_error() { return io_error; }
+void cre_mcu_record_error(int code) { if (io_error == CRE_OK || code == CRE_CANCELLED) io_error = code; }
 FT_Error cre_mcu_new_library(FT_Library *out) {
     FT_Error error = FT_New_Library(&ftMemory, out);
     if (!error) { FT_Add_Default_Modules(*out); shared_library = *out; }
@@ -401,4 +403,12 @@ extern "C" int cre_mcu_font_preview(const char *path, const char *text, uint32_t
     } catch (const CreMcuFailure &e) { return e.code; }
       catch (const std::bad_alloc &) { return CRE_MEMORY; }
       catch (...) { return CRE_CONTENT; }
+}
+
+CreLayoutRecords cre_mcu_layout_records() {
+    if (!platform.read_layout || !platform.write_layout) return {};
+    return {platform.context,
+        [](void *context, uint64_t key, void *out, size_t capacity, size_t *actual) { return platform.read_layout(context, key, out, capacity, actual) != 0; },
+        [](void *context, uint64_t key, const void *data, size_t bytes) { return platform.write_layout(context, key, data, bytes) != 0; },
+        [](void *context, uint64_t key) { if (platform.remove_layout) platform.remove_layout(context, key); }};
 }

@@ -225,6 +225,9 @@ enum CacheFileBlockType {
     CBT_BLOB_INDEX, //16
     CBT_BLOB_DATA,
     CBT_FONT_DATA  //18
+#if CR_MCU
+    , CBT_MCU_GEOMETRY, CBT_MCU_CURSOR
+#endif
 };
 
 
@@ -819,24 +822,22 @@ bool CacheFile::readIndex()
         CRLog::error("CacheFile::readIndex: invalid number of blocks in index");
         return false;
     }
-    CacheFileItem * index = new CacheFileItem[count];
+    std::unique_ptr<CacheFileItem[]> index(new CacheFileItem[count]);
     bytesRead = 0;
     lvsize_t  sz = sizeof(CacheFileItem)*count;
-    _stream->Read(index, sz, &bytesRead );
+    _stream->Read(index.get(), sz, &bytesRead );
     if ( bytesRead!=sz )
         return false;
     // check CRC
-    lUInt32 hash = calcHash( (lUInt8*)index, sz );
+    lUInt32 hash = calcHash( (lUInt8*)index.get(), sz );
     if ( hdr._indexBlock._dataHash!=hash ) {
         CRLog::error("CacheFile::readIndex: CRC doesn't match found %08x expected %08x", hash, hdr._indexBlock._dataHash);
-        delete[] index;
         return false;
     }
     for ( int i=0; i<count; i++ ) {
         if (index[i]._dataType == CBT_INDEX)
             index[i] = hdr._indexBlock;
         if ( !index[i].validate(_size) ) {
-            delete[] index;
             return false;
         }
         CacheFileItem * item = new CacheFileItem();
@@ -848,7 +849,6 @@ bool CacheFile::readIndex()
         else
             _map.set( key, item );
     }
-    delete[] index;
     CacheFileItem * indexitem = findBlock(CBT_INDEX, 0);
     if ( !indexitem ) {
         CRLog::error("CacheFile::readIndex: index block info doesn't match header");
@@ -877,7 +877,7 @@ bool CacheFile::writeIndex()
         (void)indexItem; // silences clang warning
         count = _index.length();
     }
-    CacheFileItem * index = new CacheFileItem[count]();
+    std::unique_ptr<CacheFileItem[]> index(new CacheFileItem[count]());
     int sz = count * sizeof(CacheFileItem);
     for ( int i = 0; i < count; i++ ) {
         memcpy( &index[i], _index[i], sizeof(CacheFileItem) );
@@ -887,8 +887,7 @@ bool CacheFile::writeIndex()
             index[i]._dataSize = 0;
         }
     }
-    bool res = write(CBT_INDEX, 0, (const lUInt8*)index, sz, false);
-    delete[] index;
+    bool res = write(CBT_INDEX, 0, (const lUInt8*)index.get(), sz, false);
 
     indexItem = findBlock(CBT_INDEX, 0);
     if ( !res || !indexItem ) {
@@ -5036,7 +5035,11 @@ ldomDocument::~ldomDocument()
     delete _mcu_page_context;
 #endif
 #if BUILD_LITE!=1
+    // 中文：MCU 只在显式检查点写盘，析构时不能触发 I/O 或取消异常。
+    // English: MCU writes only at explicit checkpoints; destruction must not perform I/O or throw on cancellation.
+#if !CR_MCU
     updateMap(); // NOLINT: Call to virtual function during destruction
+#endif
     // Our cache of LFormattedTextRefs may have some with a non-null LVFontRef
     // keeping alive some font instances (eg. for initial-letter).
     // Drop them before unregistering document fonts.
@@ -5585,6 +5588,29 @@ bool ldomDocument::partialRender( ldomNode * node ) {
 }
 
 #if CR_MCU
+bool ldomDocument::openMcuCache(LVStreamRef stream, CacheLoadingCallback *formatCallback)
+{
+    if (stream.isNull() || _cacheFile) return false;
+    auto cache = std::make_unique<CacheFile>(_DOMVersionRequested);
+    if (!cache->open(stream)) return false;
+    _cacheFile = cache.release();
+    _textStorage.setCache(_cacheFile); _elemStorage.setCache(_cacheFile);
+    _rectStorage.setCache(_cacheFile); _styleStorage.setCache(_cacheFile); _blobCache.setCacheFile(_cacheFile);
+    return openFromCache(formatCallback);
+}
+bool ldomDocument::saveMcuCache(LVStreamRef stream, LVRendPageList *pages)
+{
+    if (!_rendered || !pages || stream.isNull()) return false;
+    if (!_cacheFile) {
+        auto cache = std::make_unique<CacheFile>(_DOMVersionRequested);
+        if (!cache->create(stream)) return false;
+        _cacheFile = cache.release();
+        _textStorage.setCache(_cacheFile); _elemStorage.setCache(_cacheFile);
+        _rectStorage.setCache(_cacheFile); _styleStorage.setCache(_cacheFile); _blobCache.setCacheFile(_cacheFile);
+    }
+    _pagesData.reset(); if (!pages->serialize(_pagesData)) return false;
+    return saveChanges();
+}
 bool ldomDocument::saveMcuPageState(SerialBuf &geometry, SerialBuf &cursor)
 {
     return _mcu_page_context && _mcu_page_context->saveMcuState(geometry, cursor);
@@ -5823,6 +5849,16 @@ bool ldomDocument::render( LVRendPageList * pages, LVDocViewCallback * callback,
         if ( was_just_rendered_from_cache && _pagesData.pos() ) {
             _pagesData.setPos(0);
             pages->deserialize( _pagesData );
+#if CR_MCU
+            SerialBuf state(0, true);
+            if (!_cacheFile->read(CBT_MCU_CURSOR, state) || state.size() < 1) throw CreMcuFailure{CRE_CONTENT};
+            if (state.buf()[0]) {
+                SerialBuf geometry(0, true);
+                if (state.buf()[0] != 1 || !_cacheFile->read(CBT_MCU_GEOMETRY, geometry)) throw CreMcuFailure{CRE_CONTENT};
+                SerialBuf fixed(geometry.buf(), geometry.size()), cursor(state.buf() + 1, state.size() - 1);
+                if (!restoreMcuPageState(fixed, cursor, pages)) throw CreMcuFailure{CRE_CONTENT};
+            }
+#endif
         }
         CRLog::info("%d rendered pages found", pages->length() );
 
@@ -18597,6 +18633,17 @@ ContinuousOperationResult ldomDocument::saveChanges( CRTimerUtil & maxTime, LVDo
         // fall through
     case 7:
         _mapSavingStage = 7;
+#if CR_MCU
+        {
+            SerialBuf geometry(0), cursor(0), state(0);
+            state << lUInt8(_mcu_page_context ? 1 : 0);
+            if (_mcu_page_context) {
+                if (!saveMcuPageState(geometry, cursor) || !_cacheFile->write(CBT_MCU_GEOMETRY, geometry, true)) return CR_ERROR;
+                state << cursor;
+            }
+            if (!_cacheFile->write(CBT_MCU_CURSOR, state, true)) return CR_ERROR;
+        }
+#endif
         if ( _pagesData.pos() ) {
             CRLog::trace("ldomDocument::saveChanges() - page data (%d bytes)", _pagesData.pos());
             if ( !_cacheFile->write( CBT_PAGE_DATA, _pagesData, COMPRESS_PAGES_DATA  ) ) {

@@ -10,6 +10,7 @@
 #include "lvfntman.h"
 #include "cre_stylesheets.h"
 #include "source_cache.h"
+#include "layout_cache.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
@@ -23,7 +24,10 @@ struct cre_document {
     cre_metadata metadata{};
     EpubIndex index;
     std::shared_ptr<CreSourceCache> sources;
-    LVStreamRef stream;
+    LVStreamRef stream, layout_cache;
+    uint64_t layout_key = 0;
+    uint32_t current_page = 0;
+    bool cache_blocked = false;
     std::unique_ptr<LVDocView> view;
     uint32_t chapter = UINT32_MAX;
     LVTocItem *next_toc = nullptr;
@@ -45,7 +49,7 @@ template<typename Function> int boundary(Function function) {
         if (result == CRE_OK) cre_mcu_checkpoint();
         return cre_mcu_error() != CRE_OK ? cre_mcu_error() : result;
     }
-    catch (const CreMcuFailure &failure) { return failure.code; }
+    catch (const CreMcuFailure &failure) { return failure.code == CRE_CANCELLED ? CRE_CANCELLED : cre_mcu_error() != CRE_OK ? cre_mcu_error() : failure.code; }
     catch (const std::bad_alloc &) { return CRE_MEMORY; }
     catch (...) { return CRE_CONTENT; }
 }
@@ -75,10 +79,38 @@ void metadata(cre_document &d, CRPropRef props) {
     copy(d.metadata.language, sizeof(d.metadata.language), props->getStringDef(DOC_PROP_LANGUAGE));
     d.metadata.has_cover = !props->getStringDef(DOC_PROP_COVER_FILE).empty();
 }
-int load(cre_document &d, uint32_t chapter) {
+uint64_t layoutIdentity(const cre_document &d, uint32_t chapter) {
+    if (!cre_mcu_layout_records().read) return 0;
+    uint64_t key = cre_mcu_build_identity();
+    auto hash = [&](const void *data, size_t bytes) {
+        auto *p = static_cast<const uint8_t *>(data);
+        while (bytes--) key = (key ^ *p++) * UINT64_C(1099511628211);
+    };
+    auto &l = d.layout;
+    const uint32_t values[] = {chapter, l.width, l.height, l.pixels, l.weight, l.margin, l.line_percent,
+        l.paragraph_quarters, l.indent, l.override_style, l.bottom_margin};
+    hash(values, sizeof(values)); hash(d.path.c_str(), d.path.size()); hash(l.font, std::strlen(l.font));
+    // 中文：字号共享同源身份；字体替换需检查长度和首尾块，不能仅使用路径。
+    // English: Sizes share source identity; font replacement checks length and endpoint blocks, not just its path.
+    auto font = LVOpenFileStream(l.font, LVOM_READ); if (font.isNull()) return 0;
+    auto size = font->GetSize(); hash(&size, sizeof(size));
+    std::unique_ptr<uint8_t, decltype(&cre_mcu_release)> bytes(static_cast<uint8_t *>(cre_mcu_allocate_optional(4096)), cre_mcu_release);
+    if (!bytes) return 0;
+    for (lvpos_t offset : {lvpos_t(0), size > 4096 ? lvpos_t(size - 4096) : lvpos_t(0)}) {
+        cre_mcu_checkpoint(); lvsize_t count = std::min<lvsize_t>(size - offset, 4096), actual = 0;
+        if (font->SetPos(offset) != offset || font->Read(bytes.get(), count, &actual) != LVERR_OK || actual != count) return 0;
+        hash(bytes.get(), count);
+    }
+    return key ? key : 1;
+}
+void discardLayout(cre_document &d) {
+    d.view.reset(); d.layout_cache.Clear(); d.hits.clear(); d.next_toc = nullptr;
+    d.toc_started = false; d.cache_blocked = true; fontMan->gc();
+}
+int loadOnce(cre_document &d, uint32_t chapter) {
     if (d.view && d.chapter == chapter) return CRE_OK;
     d.next_toc = nullptr; d.next_toc_index = 0; d.toc_started = false;
-    d.view.reset(); d.chapter = UINT32_MAX;
+    d.view.reset(); d.layout_cache.Clear(); d.chapter = UINT32_MAX;
     if (!d.font_registered) {
         if (!fontMan->RegisterExternalFont(-1, Utf8ToUnicode(d.layout.font), lString8("mcu-reading"), 400, 100, false))
             return cre_mcu_error() == CRE_OK ? CRE_CONTENT : cre_mcu_error();
@@ -112,8 +144,12 @@ int load(cre_document &d, uint32_t chapter) {
     }
     view->setStyleSheet(lString8(style.c_str()));
     if (d.index.ready) view->setEpubIndex(&d.index, static_cast<int>(chapter));
+    d.layout_key = layoutIdentity(d, chapter);
+    if (d.layout_key && !d.cache_blocked) d.layout_cache = cre_layout_stream(cre_mcu_layout_records(), d.layout_key, true);
+    view->setMcuCacheStream(d.layout_cache);
     d.stream->SetPos(0);
     if (!view->LoadDocument(d.stream)) return CRE_CONTENT;
+    if (!view->mcuCacheLoaded()) d.layout_cache.Clear();
     view->getDocument()->setMcuPageLimit(3);
     // 中文：封面作为独立资源提供，不插入正文页序列。
     // English: Expose covers as separate resources without inserting them into body pagination.
@@ -123,6 +159,17 @@ int load(cre_document &d, uint32_t chapter) {
     metadata(d, view->getDocProps());
     d.view = std::move(view); d.chapter = chapter;
     return CRE_OK;
+}
+int load(cre_document &d, uint32_t chapter) {
+    for (unsigned attempt = 0; attempt < 2; ++attempt) {
+        int result;
+        try { result = loadOnce(d, chapter); }
+        catch (const CreMcuFailure &error) { result = error.code; }
+        if (result != CRE_CANCELLED && cre_mcu_error() != CRE_OK) result = cre_mcu_error();
+        if (attempt || d.layout_cache.isNull() || (result != CRE_IO && result != CRE_CONTENT)) return result;
+        discardLayout(d); cre_mcu_reset_error();
+    }
+    return CRE_CONTENT;
 }
 int render(cre_document &d, uint8_t *pixels, size_t capacity) {
     const auto &l = d.layout;
@@ -219,7 +266,19 @@ extern "C" int cre_document_source_cache(cre_document *d, const cre_source_cache
 }
 extern "C" int cre_document_checkpoint(cre_document *d) {
     if (!d) return CRE_INVALID;
-    return boundary([&]() -> int { if (d->sources) cre_source_cache_checkpoint(*d->sources); return CRE_OK; });
+    int result = boundary([&]() -> int {
+        if (d->sources) cre_source_cache_checkpoint(*d->sources);
+        if (!d->view || !d->layout_key || !d->view->getDocument()->isRendered()) return CRE_OK;
+        if (d->layout_cache.isNull()) d->layout_cache = cre_layout_stream(cre_mcu_layout_records(), d->layout_key, false);
+        if (d->layout_cache.isNull()) return CRE_OK;
+        if (!d->view->getDocument()->saveMcuCache(d->layout_cache, d->view->getPageList())
+            || !cre_layout_commit(d->layout_cache)) return CRE_IO;
+        return CRE_OK;
+    });
+    // 中文：工作副本失败后重新从源加载，已交付给宿主的像素仍保持不变。
+    // English: Rebuild a failed working copy from source; previously delivered host pixels remain unchanged.
+    if (result != CRE_OK && !d->layout_cache.isNull()) discardLayout(*d);
+    return result;
 }
 extern "C" int cre_document_prefetch(cre_document *d, uint32_t chapter) {
     if (!d || chapter >= d->metadata.chapters) return CRE_INVALID;
@@ -238,48 +297,54 @@ extern "C" int cre_document_metadata(cre_document *d, cre_metadata *out) {
 extern "C" int cre_document_layout(cre_document *d, const cre_layout *layout) {
     if (!d || !valid(layout)) return CRE_INVALID;
     return boundary([&]() -> int {
-        d->view.reset(); d->chapter = UINT32_MAX;
+        d->view.reset(); d->layout_cache.Clear(); d->chapter = UINT32_MAX; d->layout_key = 0; d->cache_blocked = false;
         if (d->font_registered) { fontMan->UnregisterDocumentFonts(-1); fontMan->gc(); d->font_registered = false; }
         d->layout = *layout; return CRE_OK;
     });
 }
 extern "C" int cre_document_prepare(cre_document *d, const cre_anchor *anchor, uint32_t page, uint8_t *pixels, size_t capacity, cre_page_state *out) {
     if (!d || !anchor || !out || anchor->chapter >= d->metadata.chapters || !std::memchr(anchor->path, 0, sizeof(anchor->path))) return CRE_INVALID;
-    int result = boundary([&]() -> int {
-        int result = load(*d, anchor->chapter); if (result != CRE_OK) return result;
-        d->view->Render();
-        // 中文：锚点可能指向远处脚注；先确定其布局范围，普通翻页按需推进。
-        // English: Anchors may target distant notes; resolve their layout range first, while ordinary turns advance on demand.
-        if (page >= INT32_MAX) return CRE_INVALID;
-        d->view->getDocument()->continueMcuPages(anchor->path[0] ? 0 : int(page + 1));
-        if (anchor->path[0]) {
-            if (anchor->path[0] == '#') {
-                if (!d->view->goLink(Utf8ToUnicode(anchor->path), false)) return CRE_CONTENT;
-            } else {
-                auto pointer = d->view->getDocument()->createXPointer(Utf8ToUnicode(anchor->path));
-                if (pointer.isNull()) return CRE_CONTENT;
-                d->view->goToBookmark(pointer);
-            }
-        } else if (page >= static_cast<uint32_t>(d->view->getPageCount()) || !d->view->goToPage(page)) return CRE_INVALID;
-        result = render(*d, pixels, capacity); if (result != CRE_OK) return result;
-        collectHits(*d);
-        *out = {}; out->page = d->view->getCurPage(); out->pages = d->view->getPageCount(); out->complete = d->view->getDocument()->mcuPagesComplete();
-        out->anchor.chapter = d->chapter;
-        auto path = UnicodeToUtf8(d->view->getBookmark().toString());
-        if (path.length() >= static_cast<int>(sizeof(out->anchor.path))) return CRE_CONTENT;
-        std::strcpy(out->anchor.path, path.c_str()); return CRE_OK;
-    });
-    if (result != CRE_OK) { d->view.reset(); d->chapter = UINT32_MAX; d->hits.clear(); fontMan->gc(); }
+    int result = CRE_CONTENT;
+    for (unsigned attempt = 0; attempt < 2; ++attempt) {
+        result = boundary([&]() -> int {
+            int result = load(*d, anchor->chapter); if (result != CRE_OK) return result;
+            d->view->Render();
+            // 中文：锚点可能指向远处脚注；先确定其布局范围，普通翻页按需推进。
+            // English: Anchors may target distant notes; resolve their layout range first, while ordinary turns advance on demand.
+            if (page >= INT32_MAX) return CRE_INVALID;
+            d->view->getDocument()->continueMcuPages(anchor->path[0] ? 0 : int(page + 1));
+            if (anchor->path[0]) {
+                if (anchor->path[0] == '#') {
+                    if (!d->view->goLink(Utf8ToUnicode(anchor->path), false)) return CRE_CONTENT;
+                } else {
+                    auto pointer = d->view->getDocument()->createXPointer(Utf8ToUnicode(anchor->path));
+                    if (pointer.isNull()) return CRE_CONTENT;
+                    d->view->goToBookmark(pointer);
+                }
+            } else if (page >= static_cast<uint32_t>(d->view->getPageCount()) || !d->view->goToPage(page)) return CRE_INVALID;
+            result = render(*d, pixels, capacity); if (result != CRE_OK) return result;
+            collectHits(*d);
+            *out = {}; out->page = d->view->getCurPage(); out->pages = d->view->getPageCount(); out->complete = d->view->getDocument()->mcuPagesComplete();
+            out->anchor.chapter = d->chapter;
+            auto path = UnicodeToUtf8(d->view->getBookmark().toString());
+            if (path.length() >= static_cast<int>(sizeof(out->anchor.path))) return CRE_CONTENT;
+            std::strcpy(out->anchor.path, path.c_str()); d->current_page = out->page; return CRE_OK;
+        });
+        bool retry = !attempt && !d->layout_cache.isNull() && (result == CRE_IO || result == CRE_CONTENT);
+        if (result != CRE_OK) discardLayout(*d);
+        if (!retry) break;
+    }
     return result;
 }
 extern "C" int cre_document_extend(cre_document *d, uint32_t pages, uint32_t *confirmed, uint32_t *complete) {
-    if (!d || !d->view || !confirmed || !complete || pages >= INT32_MAX) return CRE_INVALID;
+    if (!d || d->chapter == UINT32_MAX || !confirmed || !complete || pages >= INT32_MAX) return CRE_INVALID;
     int result = boundary([&]() -> int {
+        int rc = load(*d, d->chapter); if (rc != CRE_OK) return rc;
         d->view->checkRender();
         *complete = d->view->getDocument()->continueMcuPages(int(pages));
         *confirmed = d->view->getPageCount(); return CRE_OK;
     });
-    if (result != CRE_OK) { d->view.reset(); d->chapter = UINT32_MAX; d->hits.clear(); fontMan->gc(); }
+    if (result != CRE_OK) discardLayout(*d);
     return result;
 }
 extern "C" int cre_document_toc(cre_document *d, uint32_t first, cre_toc_entry *out, uint32_t capacity, uint32_t *count) {
@@ -297,7 +362,8 @@ extern "C" int cre_document_toc(cre_document *d, uint32_t first, cre_toc_entry *
                     copy(item.anchor.path, sizeof(item.anchor.path), id);
                 }
             }
-        } else if (d->view) {
+        } else {
+            int rc = load(*d, 0); if (rc != CRE_OK) return rc;
             // 中文：目录只需要结构锚点；视图目录会更新页码并触发全文排版和字形读取。
             // English: Contents need structural anchors only; view-level contents update page numbers and trigger full layout and glyph reads.
             auto advance = [](LVTocItem *item) -> LVTocItem * {
@@ -328,8 +394,13 @@ extern "C" int cre_document_toc(cre_document *d, uint32_t first, cre_toc_entry *
     });
 }
 extern "C" int cre_document_text(cre_document *d, char *out, size_t capacity) {
-    if (!d || !d->view || !out || !capacity) return CRE_INVALID;
-    return boundary([&]() -> int { copy(out, capacity, d->view->getPageText(false)); return CRE_OK; });
+    if (!d || d->chapter == UINT32_MAX || !out || !capacity) return CRE_INVALID;
+    return boundary([&]() -> int {
+        int rc = load(*d, d->chapter); if (rc != CRE_OK) return rc;
+        d->view->Render(); d->view->getDocument()->continueMcuPages(d->current_page + 1);
+        if (!d->view->goToPage(d->current_page)) return CRE_CONTENT;
+        copy(out, capacity, d->view->getPageText(false)); return CRE_OK;
+    });
 }
 extern "C" int cre_document_cover(cre_document *d, uint8_t *pixels, size_t capacity) {
     if (!d) return CRE_INVALID;

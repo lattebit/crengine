@@ -2963,6 +2963,10 @@ public:
     bool saveMcuPageState(SerialBuf &geometry, SerialBuf &cursor);
     /// 完整校验后替换续算状态，保持当前已确认页。/ Replace continuation state after validation, retaining confirmed pages.
     bool restoreMcuPageState(SerialBuf &geometry, SerialBuf &cursor, LVRendPageList *pages);
+    /// 通过所属会话的流恢复布局，不使用全局目录扫描。/ Restore layout through the owning session's stream without global directory scans.
+    bool openMcuCache(LVStreamRef stream, CacheLoadingCallback *formatCallback);
+    /// 保存 DOM、几何和已确认页；宿主随后显式发布缓存根。/ Save DOM, geometry and confirmed pages; the host explicitly publishes the cache root afterward.
+    bool saveMcuCache(LVStreamRef stream, LVRendPageList *pages);
 #endif
     bool isBeingParsed() { return _parsing; }
     /// renders (formats) document in memory: returns true if re-rendering needed, false if not

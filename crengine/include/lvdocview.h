@@ -299,6 +299,10 @@ private:
     ldomDocument * m_doc;
     lString8 m_stylesheet;
     LVRendPageList m_pages;
+#if CR_MCU
+    LVStreamRef mcu_cache_stream;
+    bool mcu_cache_loaded = false;
+#endif
     LVScrollInfo m_scrollinfo;
     LVImageSourceRef m_defaultCover;
     LVImageSourceRef m_backgroundImage;
@@ -388,6 +392,9 @@ private:
     void updateLayout();
     /// parse document from m_stream
     bool ParseDocument( );
+#if CR_MCU
+    bool restoreMcuLayout();
+#endif
     /// format of document from cache is known
     virtual void OnCacheFileFormatDetected( doc_format_t fmt );
     void insertBookmarkPercentInfo(int start_page, int end_y, int percent);
@@ -652,6 +659,11 @@ public:
     CRFileHist * getHistory() { return &m_hist; }
     /// returns formatted page list
     LVRendPageList * getPageList() { return &m_pages; }
+#if CR_MCU
+    /// 在加载前绑定已提交布局；失败回源，不写全局缓存。/ Bind a committed layout before loading; fall back to source without global cache writes.
+    void setMcuCacheStream(LVStreamRef stream) { mcu_cache_stream = stream; }
+    bool mcuCacheLoaded() const { return mcu_cache_loaded; }
+#endif
     /// returns pointer to TOC root node
     LVTocItem * getToc();
     /// returns pointer to TOC root node
