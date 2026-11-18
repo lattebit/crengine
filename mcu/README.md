@@ -19,8 +19,8 @@ cmake --build build/mcu
 
 Firmware uses `add_subdirectory(path/to/crengine/mcu)` and links `crengine::mcu`. This entry owns the FreeType, HarfBuzz, FriBidi, libunibreak, utf8proc, zlib, xxHash and MD4C static targets. NanoSVG is included in the engine translation unit. Do not compile duplicate copies of these dependencies.
 
-链接此目标的 C++ 宿主自动继承 `-fno-rtti`，与固件及引擎保持一致；不要混合带与不带 RTTI 的标准库模板实例。C++ 异常仍保留并在 C 服务边界转为错误码。
-C++ hosts linking this target inherit `-fno-rtti`, matching firmware and engine settings; do not mix standard-library template instances with and without RTTI. C++ exceptions remain enabled and are converted to error codes at the C service boundary.
+固件及裸机交叉构建使用 `-fno-rtti`；主机使用 `-frtti` 保留系统 C++ 动态库的异常类型身份。链接此目标的 C++ 调用方自动继承对应设置，避免混合标准库模板实例。C++ 异常仍保留并在 C 服务边界转为错误码。
+Firmware and bare-metal cross builds use `-fno-rtti`; hosts use `-frtti` to preserve exception type identities from the system C++ shared library. C++ callers inherit the corresponding setting to avoid mixed standard-library template instances. C++ exceptions remain enabled and are converted to error codes at the C service boundary.
 
 使用交叉工具链时关闭主机测试。S31 使用 ESP-IDF 6.1 配套的 RISC-V GCC 15.2 工具链和 `rv32imafc/ilp32f`。静态库成功编译不能替代完整固件链接或实机测量。
 

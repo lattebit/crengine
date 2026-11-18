@@ -70,14 +70,22 @@ target_include_directories(crengine_mcu PRIVATE "${CRE_DEPS}/nanosvg/src")
 target_compile_features(crengine_mcu PUBLIC cxx_std_17)
 target_compile_definitions(crengine_mcu PRIVATE DOC_BUFFER_SIZE=0x80000)
 target_compile_options(crengine_mcu PRIVATE -ffunction-sections -fdata-sections)
-# 中文：宿主与引擎必须采用同一 RTTI 设置，避免共享 C++ 模板的虚表布局和诊断不一致。
-# English: Hosts and the engine must share RTTI settings to keep shared C++ template vtables and diagnostics consistent.
-target_compile_options(crengine_mcu PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>")
+# 中文：固件裁剪 RTTI；主机保留系统 C++ 动态库的异常类型身份，并向调用方传播一致设置。
+# English: Firmware omits RTTI; hosts retain system C++ library exception identities and propagate consistent settings.
+if(ESP_PLATFORM OR CMAKE_SYSTEM_NAME STREQUAL "Generic")
+    target_compile_options(crengine_mcu PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>")
+else()
+    target_compile_options(crengine_mcu PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-frtti>")
+endif()
 target_link_libraries(crengine_mcu PUBLIC cre_freetype cre_harfbuzz cre_fribidi
     cre_unibreak cre_utf8proc cre_zlib cre_xxhash cre_md4c)
 set_target_properties(crengine_mcu PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    add_executable(cre_mcu_cpp_runtime_test tests/cpp_runtime.cpp)
+    target_link_libraries(cre_mcu_cpp_runtime_test PRIVATE crengine_mcu)
+    target_compile_options(cre_mcu_cpp_runtime_test PRIVATE -UNDEBUG)
+    add_test(NAME mcu_cpp_runtime COMMAND cre_mcu_cpp_runtime_test)
     add_executable(cre_mcu_memory_test tests/memory.cpp)
     target_link_libraries(cre_mcu_memory_test PRIVATE crengine_mcu)
     target_compile_options(cre_mcu_memory_test PRIVATE -UNDEBUG)
