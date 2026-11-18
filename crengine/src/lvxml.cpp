@@ -20,6 +20,7 @@
 #include "../include/crtxtenc.h"
 #include "../include/fb2def.h"
 #include "../include/lvdocview.h"
+#include <memory>
 
 typedef struct {
    unsigned short indx; /* index into big table */
@@ -880,10 +881,12 @@ bool LVTextFileBase::AutodetectEncoding( bool utfOnly )
         sz = m_stream->GetSize();
     if ( sz < 16 )
         return false;
-    unsigned char * buf = new unsigned char[ sz ];
+    // 中文：受管流会在读盘失败或取消时抛出，临时探测缓冲必须自动归还。
+    // English: Managed streams throw on failed reads or cancellation, so detection buffers must unwind automatically.
+    std::unique_ptr<unsigned char[]> storage(new unsigned char[sz]);
+    unsigned char * buf = storage.get();
     lvsize_t bytesRead = 0;
     if ( m_stream->Read( buf, sz, &bytesRead )!=LVERR_OK ) {
-        delete[] buf;
         m_stream->SetPos( oldpos );
         return false;
     }
@@ -894,7 +897,7 @@ bool LVTextFileBase::AutodetectEncoding( bool utfOnly )
         res = AutodetectCodePageUtf(buf, sz, enc_name);
     else
         res = AutodetectCodePage(buf, sz, enc_name, hasTags);
-    delete[] buf;
+    storage.reset();
     m_stream->SetPos( oldpos );
     if ( res) {
         //CRLog::debug("Code page decoding results: encoding=%s", enc_name);
@@ -2555,7 +2558,8 @@ bool LVTextBookmarkParser::CheckFormat()
 
     #define TEXT_PARSER_DETECT_SIZE 16384
     Reset();
-    lChar32 * chbuf = new lChar32[TEXT_PARSER_DETECT_SIZE];
+    std::unique_ptr<lChar32[]> storage(new lChar32[TEXT_PARSER_DETECT_SIZE]);
+    lChar32 * chbuf = storage.get();
     FillBuffer( TEXT_PARSER_DETECT_SIZE );
     int charsDecoded = ReadTextBytes( 0, m_buf_len, chbuf, TEXT_PARSER_DETECT_SIZE-1, 0 );
     bool res = false;
@@ -2566,7 +2570,7 @@ bool LVTextBookmarkParser::CheckFormat()
             if ( chbuf[i+1] != pattern[i] )
                 res = false;
     }
-    delete[] chbuf;
+    storage.reset();
     Reset();
     return res;
 }
@@ -2715,7 +2719,8 @@ bool LVTextParser::CheckFormat()
         return false;
     #define TEXT_PARSER_DETECT_SIZE 16384
     Reset();
-    lChar32 * chbuf = new lChar32[TEXT_PARSER_DETECT_SIZE];
+    std::unique_ptr<lChar32[]> storage(new lChar32[TEXT_PARSER_DETECT_SIZE]);
+    lChar32 * chbuf = storage.get();
     FillBuffer( TEXT_PARSER_DETECT_SIZE );
     int charsDecoded = ReadTextBytes( 0, m_buf_len, chbuf, TEXT_PARSER_DETECT_SIZE-1, 0 );
     bool res = false;
@@ -2752,7 +2757,7 @@ bool LVTextParser::CheckFormat()
         if ( illegal_char_count>0 )
             CRLog::error("illegal characters detected: count=%d", illegal_char_count );
     }
-    delete[] chbuf;
+    storage.reset();
     Reset();
     return res;
 }
@@ -2980,7 +2985,8 @@ bool LVXMLParser::CheckFormat()
     Reset();
     AutodetectEncoding();
     Reset();
-    lChar32 * chbuf = new lChar32[XML_PARSER_DETECT_SIZE];
+    std::unique_ptr<lChar32[]> storage(new lChar32[XML_PARSER_DETECT_SIZE]);
+    lChar32 * chbuf = storage.get();
     FillBuffer( XML_PARSER_DETECT_SIZE );
     int charsDecoded = ReadTextBytes( 0, m_buf_len, chbuf, XML_PARSER_DETECT_SIZE-1, 0 );
     chbuf[charsDecoded] = 0;
@@ -3017,7 +3023,7 @@ bool LVXMLParser::CheckFormat()
             }
         }
     }
-    delete[] chbuf;
+    storage.reset();
     Reset();
     //CRLog::trace("LVXMLParser::CheckFormat() finished");
     return res;
@@ -6175,7 +6181,8 @@ bool LVHTMLParser::CheckFormat()
 
         // For UTF-16/32, we don't need to scan the stream for encoding,
         // just check whether it looks like html or not.
-        lChar32 * chbuf = new lChar32[html_parser_scan_bytes / 2];
+        std::unique_ptr<lChar32[]> storage(new lChar32[html_parser_scan_bytes / 2]);
+        lChar32 * chbuf = storage.get();
         int charsDecoded = ReadTextBytes( 0, m_buf_len, chbuf, html_parser_scan_bytes / 2 - 1, 0 );
         chbuf[charsDecoded] = 0;
         bool res = false;
@@ -6201,7 +6208,7 @@ bool LVHTMLParser::CheckFormat()
                     res = true;
             }
         }
-        delete[] chbuf;
+        storage.reset();
         Reset();
         return res;
     }
