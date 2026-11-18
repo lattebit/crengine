@@ -457,7 +457,7 @@ private:
     lUInt8 * __restrict decoded;
     bool isNinePatch;
 public:
-    static int * __restrict GenMap( int src_len, int dst_len )
+    static int * GenMap( int src_len, int dst_len )
     {
         int * __restrict map = new int[ dst_len ];
         for (int i=0; i<dst_len; i++)
@@ -466,7 +466,7 @@ public:
         }
         return map;
     }
-    static int * __restrict GenNinePatchMap( int src_len, int dst_len, int frame1, int frame2)
+    static int * GenNinePatchMap( int src_len, int dst_len, int frame1, int frame2)
     {
         int * __restrict map = new int[ dst_len ];
         if (frame1 + frame2 > dst_len) {

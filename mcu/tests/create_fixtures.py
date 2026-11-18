@@ -33,3 +33,9 @@ rows = (b"\0" + bytes([0] * 16 + [160] * 16)) * 24
 png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 24, 8, 0, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 (out / "image.png").write_bytes(png)
 (out / "image.html").write_text('<html><body><p><img src="image.png" width="128" height="96"/></p></body></html>')
+with zipfile.ZipFile(out / "cover.epub", "w") as book:
+    book.writestr("mimetype", "application/epub+zip")
+    book.writestr("META-INF/container.xml", '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
+    book.writestr("content.opf", '<package version="3.0" xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Cover fixture</dc:title></metadata><manifest><item id="text" href="image.html" media-type="application/xhtml+xml"/><item id="cover" href="image.png" media-type="image/png" properties="cover-image"/></manifest><spine><itemref idref="text"/></spine></package>')
+    book.writestr("image.html", (out / "image.html").read_bytes())
+    book.writestr("image.png", png)

@@ -70,6 +70,15 @@ int main(int argc, char **argv) {
         assert(std::count(image.begin(), image.end(), uint8_t(0x44)) > 10000);
         cre_document_close(document); assert(!platform.files);
     }
+    {
+        cre_document *document = nullptr; auto path = std::string(argv[2]) + "/cover.epub";
+        assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
+        cre_metadata metadata{}; assert(cre_document_metadata(document, &metadata) == CRE_OK && metadata.has_cover);
+        assert(cre_document_cover(document, image.data(), image.size()) == CRE_OK);
+        assert(std::count(image.begin(), image.end(), uint8_t(0x44)) > 10000);
+        cre_mcu_stats_t stats{}; cre_mcu_statistics(&stats); assert(!stats.open_files);
+        cre_document_close(document); assert(!platform.files);
+    }
     for (const char *extension : {"epub", "txt", "html", "fb2", "md", "rtf"}) {
         for (size_t checkpoint : {1u, 5u, 15u, 50u, 150u, 500u, 2000u}) {
             cre_document *document = nullptr; auto path = std::string(argv[2]) + "/fixture." + extension;

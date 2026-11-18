@@ -88,13 +88,13 @@ int load(cre_document &d, uint32_t chapter) {
     props->setInt(PROP_INTERLINE_SPACE, d.layout.line_percent); props->setInt(PROP_FONT_BASE_WEIGHT, d.layout.weight);
     view->propsApply(props);
     char css[512];
-    std::snprintf(css, sizeof(css), "body { margin: 0; } p { margin: 0 0 %.2fem 0; text-indent: %uem; }", d.layout.paragraph_quarters / 4.0, d.layout.indent);
+    std::snprintf(css, sizeof(css), "body { margin: 0; } p { margin: 0 0 %.2fem 0; text-indent: %uem; }", d.layout.paragraph_quarters / 4.0, unsigned(d.layout.indent));
     lString8 name(d.path.c_str()); name.lowercase();
     std::string style(name.endsWith(".fb2") || name.endsWith(".rtf") ? cre_styles::fictionbook : name.endsWith(".txt") ? cre_styles::text : cre_styles::html);
     style += css;
     if (d.layout.override_style) {
         std::snprintf(css, sizeof(css), "p { font-family: mcu-reading !important; font-size: 1em !important; font-weight: %u !important; line-height: %u%% !important; margin-bottom: %.2fem !important; text-indent: %uem !important; }",
-                      d.layout.weight, d.layout.line_percent, d.layout.paragraph_quarters / 4.0, d.layout.indent);
+                      unsigned(d.layout.weight), unsigned(d.layout.line_percent), d.layout.paragraph_quarters / 4.0, unsigned(d.layout.indent));
         style += css;
     }
     view->setStyleSheet(lString8(style.c_str()));
@@ -110,23 +110,35 @@ int load(cre_document &d, uint32_t chapter) {
     d.view = std::move(view); d.chapter = chapter;
     return CRE_OK;
 }
-int render(cre_document &d, uint8_t *pixels, size_t capacity, bool cover) {
+int render(cre_document &d, uint8_t *pixels, size_t capacity) {
     const auto &l = d.layout;
     if (!pixels || capacity < static_cast<size_t>(l.width / 2) * l.height) return CRE_INVALID;
     size_t bytes = static_cast<size_t>(l.width) * l.height;
     std::unique_ptr<uint8_t, decltype(&cre_mcu_release)> scratch(static_cast<uint8_t *>(cre_mcu_allocate(bytes)), cre_mcu_release);
     if (!scratch) return CRE_MEMORY;
     LVGrayDrawBuf buffer(l.width, l.height, 8, scratch.get()); buffer.Clear(0xffffff);
-    if (cover) {
-        auto image = d.view->getCoverPageImage(); if (image.isNull()) return CRE_CONTENT;
-        lvRect rectangle(0, 0, l.width, l.height); d.view->drawCoverTo(&buffer, rectangle);
-    } else d.view->Draw(buffer, false);
+    d.view->Draw(buffer, false);
     cre_mcu_checkpoint();
     for (uint32_t y = 0; y < l.height; ++y) {
         const uint8_t *row = buffer.GetScanLine(y);
         for (uint32_t x = 0; x < l.width; x += 2) pixels[static_cast<size_t>(y) * l.width / 2 + x / 2] = (row[x] & 0xf0) | (row[x + 1] >> 4);
     }
     return CRE_OK;
+}
+int renderImage(cre_document &d, LVImageSourceRef image, uint8_t *pixels, size_t capacity) {
+    if (!pixels || capacity < size_t(d.layout.width / 2) * d.layout.height) return CRE_INVALID;
+        if (image.isNull() || image->GetWidth() <= 0 || image->GetHeight() <= 0) return CRE_CONTENT;
+        int w = d.layout.width, h = uint64_t(image->GetHeight()) * w / image->GetWidth();
+        if (h > int(d.layout.height)) { h = d.layout.height; w = uint64_t(image->GetWidth()) * h / image->GetHeight(); }
+        w = std::max(1, w); h = std::max(1, h);
+        std::unique_ptr<uint8_t, decltype(&cre_mcu_release)> scratch(static_cast<uint8_t *>(cre_mcu_allocate(size_t(d.layout.width) * d.layout.height)), cre_mcu_release);
+        if (!scratch) return CRE_MEMORY;
+        LVGrayDrawBuf buffer(d.layout.width, d.layout.height, 8, scratch.get()); buffer.Clear(0xffffff);
+        buffer.Draw(image, (d.layout.width - w) / 2, (d.layout.height - h) / 2, w, h, false);
+        cre_mcu_checkpoint();
+        for (size_t i = 0; i < size_t(d.layout.width) * d.layout.height; i += 2)
+            pixels[i / 2] = (scratch.get()[i] & 0xf0) | (scratch.get()[i + 1] >> 4);
+        return CRE_OK;
 }
 void addHit(cre_document &d, lvRect rectangle, const lString32 &href, bool image) {
     if (href.empty()) return;
@@ -211,7 +223,7 @@ extern "C" int cre_document_prepare(cre_document *d, const cre_anchor *anchor, u
                 d->view->goToBookmark(pointer);
             }
         } else if (page >= static_cast<uint32_t>(d->view->getPageCount()) || !d->view->goToPage(page)) return CRE_INVALID;
-        result = render(*d, pixels, capacity, false); if (result != CRE_OK) return result;
+        result = render(*d, pixels, capacity); if (result != CRE_OK) return result;
         collectHits(*d);
         *out = {}; out->page = d->view->getCurPage(); out->pages = d->view->getPageCount(); out->complete = 1;
         out->anchor.chapter = d->chapter;
@@ -259,25 +271,25 @@ extern "C" int cre_document_text(cre_document *d, char *out, size_t capacity) {
 }
 extern "C" int cre_document_cover(cre_document *d, uint8_t *pixels, size_t capacity) {
     if (!d) return CRE_INVALID;
-    return boundary([&]() -> int { int result = load(*d, d->chapter == UINT32_MAX ? 0 : d->chapter); return result == CRE_OK ? render(*d, pixels, capacity, true) : result; });
+    return boundary([&]() -> int {
+        LVStreamRef source;
+        if (d->index.ready) {
+            auto path = d->index.properties->getStringDef(DOC_PROP_COVER_FILE);
+            if (path.empty()) return CRE_CONTENT;
+            source = d->index.archive->OpenStream(path.c_str(), LVOM_READ);
+        } else {
+            int rc = load(*d, d->chapter == UINT32_MAX ? 0 : d->chapter); if (rc != CRE_OK) return rc;
+            source = d->view->getCoverPageImageStream();
+        }
+        if (source.isNull()) return CRE_CONTENT;
+        return renderImage(*d, LVCreateStreamImageSource(source), pixels, capacity);
+    });
 }
 extern "C" int cre_document_image(cre_document *d, const char *href, uint8_t *pixels, size_t capacity) {
-    if (!d || !href || !*href || std::strlen(href) >= 768 || !pixels || capacity < size_t(d->layout.width / 2) * d->layout.height) return CRE_INVALID;
+    if (!d || !href || !*href || std::strlen(href) >= 768) return CRE_INVALID;
     return boundary([&]() -> int {
         int rc = load(*d, d->chapter == UINT32_MAX ? 0 : d->chapter); if (rc != CRE_OK) return rc;
-        auto image = d->view->getDocument()->getObjectImageSource(Utf8ToUnicode(href));
-        if (image.isNull() || image->GetWidth() <= 0 || image->GetHeight() <= 0) return CRE_CONTENT;
-        int w = d->layout.width, h = uint64_t(image->GetHeight()) * w / image->GetWidth();
-        if (h > int(d->layout.height)) { h = d->layout.height; w = uint64_t(image->GetWidth()) * h / image->GetHeight(); }
-        w = std::max(1, w); h = std::max(1, h);
-        std::unique_ptr<uint8_t, decltype(&cre_mcu_release)> scratch(static_cast<uint8_t *>(cre_mcu_allocate(size_t(d->layout.width) * d->layout.height)), cre_mcu_release);
-        if (!scratch) return CRE_MEMORY;
-        LVGrayDrawBuf buffer(d->layout.width, d->layout.height, 8, scratch.get()); buffer.Clear(0xffffff);
-        buffer.Draw(image, (d->layout.width - w) / 2, (d->layout.height - h) / 2, w, h, false);
-        cre_mcu_checkpoint();
-        for (size_t i = 0; i < size_t(d->layout.width) * d->layout.height; i += 2)
-            pixels[i / 2] = (scratch.get()[i] & 0xf0) | (scratch.get()[i + 1] >> 4);
-        return CRE_OK;
+        return renderImage(*d, d->view->getDocument()->getObjectImageSource(Utf8ToUnicode(href)), pixels, capacity);
     });
 }
 extern "C" int cre_document_hit(cre_document *d, int32_t x, int32_t y, char *href, size_t capacity, uint32_t *image) {
