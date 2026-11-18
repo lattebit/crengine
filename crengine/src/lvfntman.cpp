@@ -8286,16 +8286,20 @@ public:
             stream = container->OpenStream(DecodeHTMLUrlString(name).c_str(), LVOM_READ);
         if (stream.isNull())
             return false;
-        lUInt32 size = (lUInt32)stream->GetSize();
+        lvsize_t size = stream->GetSize();
         if (size < 100) {
             printf("CRE WARNING: document font '%s' ignored: file too small\n", LCSTR(name));
             return false;
         }
+#if !CR_MCU
         if (size > 25000000) {
             printf("CRE WARNING: document font '%s' ignored: file too big\n", LCSTR(name));
             return false;
         }
+#endif
 #if CR_MCU
+        // 中文：分块读取不受旧整份驻留上限限制，提取容量由宿主缓存预算决定。
+        // English: Chunked reads do not need the old whole-file residency cap; the host cache budget governs extraction.
         lString8 cache_path = cre_mcu_cache_font(name8.c_str(), stream);
         if (cache_path.empty()) stream = cre_mcu_font_stream(stream);
         else stream.Clear();

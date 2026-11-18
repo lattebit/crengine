@@ -37,7 +37,7 @@ struct Input {
 class BoundedStream : public LVNamedStream {
     Input &input;
     lvsize_t position = 0;
-    static constexpr lvsize_t length = 8u * 1024 * 1024;
+    static constexpr lvsize_t length = 40u * 1024 * 1024;
 public:
     explicit BoundedStream(Input &in) : input(in) { ++input.live; m_mode = LVOM_READ; }
     ~BoundedStream() override { --input.live; }
