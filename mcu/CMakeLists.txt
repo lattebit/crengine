@@ -69,15 +69,15 @@ target_include_directories(crengine_mcu PUBLIC "${CMAKE_CURRENT_LIST_DIR}/includ
 target_include_directories(crengine_mcu PRIVATE "${CRE_DEPS}/nanosvg/src")
 target_compile_features(crengine_mcu PUBLIC cxx_std_17)
 target_compile_definitions(crengine_mcu PRIVATE DOC_BUFFER_SIZE=0x80000)
-target_compile_options(crengine_mcu PRIVATE -ffunction-sections -fdata-sections -fno-rtti)
+target_compile_options(crengine_mcu PRIVATE -ffunction-sections -fdata-sections)
+# 中文：宿主与引擎必须采用同一 RTTI 设置，避免共享 C++ 模板的虚表布局和诊断不一致。
+# English: Hosts and the engine must share RTTI settings to keep shared C++ template vtables and diagnostics consistent.
+target_compile_options(crengine_mcu PUBLIC "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>")
 target_link_libraries(crengine_mcu PUBLIC cre_freetype cre_harfbuzz cre_fribidi
     cre_unibreak cre_utf8proc cre_zlib cre_xxhash cre_md4c)
 set_target_properties(crengine_mcu PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(BUILD_TESTING AND CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    # 中文：主机替身与固件一样关闭 RTTI，避免测试掩盖目标构建限制。
-    # English: Test subclasses disable RTTI like firmware, so host builds cannot hide target restrictions.
-    add_compile_options(-fno-rtti)
     add_executable(cre_mcu_memory_test tests/memory.cpp)
     target_link_libraries(cre_mcu_memory_test PRIVATE crengine_mcu)
     target_compile_options(cre_mcu_memory_test PRIVATE -UNDEBUG)

@@ -14,6 +14,9 @@ body += '<table><tr><th>One</th><th>Two</th></tr><tr><td>Cell A</td><td>Cell B</
 body += '<p><a href="#note">Note link</a></p><p id="note">Footnote text.</p>'
 html = '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Fixture</title></head><body>' + body + '</body></html>'
 (out / "fixture.html").write_text(html)
+# 中文：单段长正文验证续分页不会改变已交付页面或丢失字符。
+# English: A long single paragraph checks resumed pagination for immutable delivered pages and complete text.
+(out / "long-paragraph.html").write_text('<html><body><p>' + '中文测试。' * 2000 + '</p></body></html>')
 # 复杂分页状态对照，不依赖设备字体设置。/ Complex pagination state comparison independent of device font settings.
 stress = '<div class="float">Floating 中文 text ' + paragraph + '</div><ol start="7">'
 stress += ''.join(f'<li><p>{paragraph * 2}<a href="#n{i % 3}">[{i % 3}]</a></p></li>' for i in range(36)) + '</ol>'
@@ -145,3 +148,32 @@ with zipfile.ZipFile(out / 'prefetch-capacity.epub', 'w', zipfile.ZIP_DEFLATED) 
     book.writestr('book.opf', '<package xmlns="http://www.idpf.org/2007/opf"><manifest>' + ''.join(f'<item id="c{i}" href="{i}.xhtml" media-type="application/xhtml+xml"/>' for i in range(4)) + '</manifest><spine>' + ''.join(f'<itemref idref="c{i}"/>' for i in range(4)) + '</spine></package>')
     for i in range(4):
         book.writestr(f'{i}.xhtml', '<html><body><p>' + 'A' * ((200 if i < 3 else 300) * 1024) + '</p></body></html>')
+
+# 中文：迁移旧包解析器的异常输入；恢复策略由新解析器决定，但不能读取包外资源或污染后续文档。
+# English: Retain malformed-package scenarios; the new parser owns recovery policy, but must not read outside the package or contaminate later documents.
+with zipfile.ZipFile(out / 'nav-ncx-utf-8.epub') as book:
+    package_base = {name: book.read(name) for name in book.namelist() if name != 'unused.ttf'}
+opf_path = 'OPS/pkg/book.opf'
+container_path = 'META-INF/container.xml'
+opf = package_base[opf_path].decode()
+package_variants = {
+    'missing-reference': {opf_path: opf.replace('idref="c2"', 'idref="missing"')},
+    'duplicate-id': {opf_path: opf.replace('id="c2"', 'id="c1"')},
+    'nul': {opf_path: opf.replace('</package>', '\0</package>')},
+    'mismatched-tag': {opf_path: opf.replace('</manifest>', '</wrong>')},
+    'multiple-roots': {opf_path: opf + '<extra/>'},
+    'broken-ncx': {'OPS/toc/book.ncx': '<ncx><broken></ncx>'},
+    'trailing-ncx': {'OPS/toc/book.ncx': package_base['OPS/toc/book.ncx'].decode() + '<broken>'},
+    'internal-dtd': {opf_path: opf.replace('<package ', '<!DOCTYPE package [<!ENTITY external SYSTEM "file:///never-open-this-font-test">]><package ').replace('Title &amp; 中文', '&external;')},
+    'truncated-utf16': {container_path: b'\xff\xfe<\x00c'},
+    'surrogate-utf16': {container_path: b'\xff\xfe' + '<container>'.encode('utf-16-le') + b'\x00\xd8' + '</container>'.encode('utf-16-le')},
+    'empty-container': {container_path: '<container/>'},
+    'escape-container': {container_path: package_base[container_path].replace(b'OPS/pkg/book.opf', b'../../outside.opf')},
+}
+for name, href in [('escape-path', '../../../outside.xhtml'), ('url-path', 'https://example.invalid/body.xhtml'),
+                   ('escaped-url-path', 'https%3A//example.invalid/body.xhtml'), ('bad-percent', '../text/%XX.xhtml')]:
+    package_variants[name] = {opf_path: opf.replace('../text/part%201%26x.xhtml', href)}
+for name, changes in package_variants.items():
+    with zipfile.ZipFile(out / f'package-{name}.epub', 'w', zipfile.ZIP_DEFLATED) as book:
+        for path, data in {**package_base, **changes}.items():
+            book.writestr(path, data)

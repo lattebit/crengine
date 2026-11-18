@@ -19,6 +19,9 @@ cmake --build build/mcu
 
 Firmware uses `add_subdirectory(path/to/crengine/mcu)` and links `crengine::mcu`. This entry owns the FreeType, HarfBuzz, FriBidi, libunibreak, utf8proc, zlib, xxHash and MD4C static targets. NanoSVG is included in the engine translation unit. Do not compile duplicate copies of these dependencies.
 
+链接此目标的 C++ 宿主自动继承 `-fno-rtti`，与固件及引擎保持一致；不要混合带与不带 RTTI 的标准库模板实例。C++ 异常仍保留并在 C 服务边界转为错误码。
+C++ hosts linking this target inherit `-fno-rtti`, matching firmware and engine settings; do not mix standard-library template instances with and without RTTI. C++ exceptions remain enabled and are converted to error codes at the C service boundary.
+
 使用交叉工具链时关闭主机测试。S31 使用 ESP-IDF 6.1 配套的 RISC-V GCC 15.2 工具链和 `rv32imafc/ilp32f`。静态库成功编译不能替代完整固件链接或实机测量。
 
 Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain bundled with ESP-IDF 6.1 and `rv32imafc/ilp32f`. A successful static build does not replace firmware linking or hardware measurement.
@@ -112,6 +115,9 @@ ctest --test-dir build/mcu-test --output-on-failure
 测试生成六格式样本，检查有效灰阶内容、EPUB 逐章与完整排版像素对照、Markdown 直接 DOM 与 MD4C HTML 参考像素对照、C 接口锚点和链接、字体预览缺字/取消/I/O/分配故障清理。Markdown 对照显式统一 H1 分页规则，避免上游 `html-document` 样式条件造成格式间差异。需要检查 CJK 像素时应选择覆盖中英文的字体。
 
 Fixtures cover six formats, meaningful grayscale content, chapter-versus-full EPUB pixels, direct Markdown DOM versus MD4C HTML pixels, C-port anchors/links, and preview fault cleanup. The Markdown comparison explicitly aligns H1 pagination to remove the upstream `html-document` format-specific difference. Use a font covering CJK and Latin when checking multilingual pixels.
+
+旧引擎场景迁移包含 10000 字符单段的完整/续分页逐像素对照、跨读取边界的属性与文本、实体与 CDATA，以及十六种异常 EPUB 包。异常输入可以由新解析器恢复，但不得打开包外文件；每次关闭后在同一引擎重开正常书，必须保持页面一致。此测试不承诺整个章节块布局已可暂停。
+Migrated legacy scenarios compare full/resumed pagination for a 10000-character paragraph, split attributes/text across read boundaries, retain entity/CDATA semantics and exercise sixteen malformed EPUB packages. The new parser may recover malformed input but must never open files outside the package. After each close, a normal book must reopen in the same engine with identical pixels. These tests do not imply that whole-chapter block layout is already pausable.
 
 C++ 分配失败测试覆盖文档打开与绘制的前 100 次分配及分散在全流程中的 64 个位置，并覆盖前 32 次和全流程 32 个位置的持续分配失败。错误必须回到 C 接口，关闭后释放资源；同一引擎中重新打开必须保持像素一致，不能靠关闭全局引擎恢复。可用 `cre_mcu_allocation_failure_test FONT FIXTURES --case OFFSET DRAW` 单独复现；`DRAW` 为 0 表示从打开开始，为 1 表示从绘制开始。设置 `CRE_TEST_ALLOCATION_TRACE=1` 打印失败栈。
 C++ allocation tests inject one-shot failures into the first 100 allocations and 64 positions spanning document open/draw, plus persistent failures in the first 32 allocations and 32 positions spanning each operation. Errors must return through the C API and closing must release resources. Reopening in the same engine must retain identical pixels, without global shutdown for recovery. Reproduce one case with the command above: `DRAW=0` starts at open and `DRAW=1` at draw. Set `CRE_TEST_ALLOCATION_TRACE=1` for failure stacks.

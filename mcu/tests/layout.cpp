@@ -65,11 +65,15 @@ int main(int argc, char **argv) {
         assert(partial->getDocument()->continueMcuPages(0) && partial->getPageCount() == view->getPageCount());
         std::printf("%s pages=%d ink=%zu\n", extension, view->getPageCount(), ink);
     }
-    {
-        // 中文：浮动、负边距、列表、跨页表格及延后脚注必须与完整分页逐像素一致。
-        // English: Floats, negative margins, lists, spanning tables and deferred notes must match complete pagination pixel for pixel.
-        auto path = std::string(argv[2]) + "/pagination.html";
+    for (const char *name : {"pagination.html", "long-paragraph.html"}) {
+        // 中文：长段、浮动、负边距、列表、跨页表格及延后脚注必须与完整分页逐像素一致。
+        // English: Long paragraphs, floats, negative margins, lists, spanning tables and deferred notes must match complete pagination pixel for pixel.
+        auto path = std::string(argv[2]) + '/' + name;
         auto full = load(path, 24), partial = load(path, 24, nullptr, -1, false, 1);
+        if (!std::strcmp(name, "long-paragraph.html")) {
+            auto *body = full->getDocument()->nodeFromXPath(lString32("html/body/p"));
+            assert(body && body->getText().length() == 10000);
+        }
         assert(!partial->getDocument()->mcuPagesComplete());
         auto first = draw(*partial, 0);
         for (int page = 0; page < full->getPageCount(); ++page) {
