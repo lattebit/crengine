@@ -10,6 +10,15 @@ extern "C" {
 #endif
 typedef struct cre_document cre_document;
 typedef struct {
+    void *context; ///< 文档所属缓存 / Owning document cache
+    int (*read)(void *, uint64_t, void *, size_t); ///< 精确读取已校验源记录，命中返回非零 / Read an exact verified source record; nonzero on a hit
+    int (*write)(void *, uint64_t, const void *, size_t); ///< 延后写入，成功返回非零 / Deferred write; nonzero on success
+} cre_source_cache;
+/// 源缓存与排版无关；回调只在工作任务执行，不得抛异常。/ Layout-independent source cache; callbacks run on the worker and must not throw.
+int cre_document_source_cache(cre_document *document, const cre_source_cache *cache);
+/// 只在显式检查点持久化近期源；失败保留可重试脏项。/ Persist recent sources at explicit checkpoints; retain failed dirty entries for retry.
+int cre_document_checkpoint(cre_document *document);
+typedef struct {
     uint32_t width, height, pixels, weight; ///< 页面与字体参数 / Page and font parameters
     uint32_t margin, line_percent, paragraph_quarters, indent, override_style; ///< 排版选项 / Typography options
     char font[768]; ///< 字体文件 / Font file

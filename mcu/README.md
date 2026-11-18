@@ -27,6 +27,7 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 
 - `cre_mcu_initialize` 初始化字体后端；`cre_mcu_font_preview` 只使用字体，不创建文档。字体源按路径共享四个 4 KiB 读取块；最后一个引用释放时关闭源文件。字体预览引用在成功、失败和取消后全部归还。
 - `cre_document_open` 创建唯一活动文档。EPUB 的 OPF、ZIP 目录、解混淆状态、spine 和导航目录保存在独立 `EpubIndex` 中，正文按章节加载。其他格式保留其解析所需 DOM。
+- EPUB 的 XHTML/HTML/CSS 源缓存独立于字体和布局，至多八项、合计 512 KiB、单项 256 KiB。超限资源仍流式读取原 ZIP；源字节计入统一分配预算，在途读者保护其引用。`cre_document_source_cache` 接入宿主持久化，`cre_document_checkpoint` 才写脏项；失败可以重试，排版变化不会清空源缓存。
 - `cre_document_prepare` 准备当前章节的块布局，首批只确定至少三页；后续翻页按需推进。`cre_document_extend` 保留分页器的行游标、未完成页、文档流和延后脚注，不重新分页已交付内容。`complete` 仅表示当前章节结束。当前块布局准备仍覆盖整个章节，TXT 仍构造完整 DOM；这两个阶段尚不是流式续算。分页、字体和图像操作均不得在 UI 绘制回调执行。
 - 像素缓冲由调用者分配和管理：白色为 15，左像素在高半字节。上游 `LVGrayDrawBuf` 的 4/8 位灰阶内部仍为一字节一像素，端口使用可释放的灰阶工作区再打包。不得把半字节输出缓冲直接传给该上游对象。
 - `cre_document_toc`、`resolve`、`prepare` 使用章节和内容路径，不使用全书页号作为持久进度。宿主借用像素期间必须保证缓冲不被重新使用。
@@ -39,6 +40,8 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 `cre_mcu_build_identity()` 无初始化副作用，身份包含构建源码、依赖提交、裁剪选项和用户代理样式，可直接用作字体与布局缓存身份的一部分。修改编译选项时应同步修改 `crsetup.h.in` 或依赖构建入口，使身份随行为变化。
 
 `cre_mcu_build_identity()` requires no initialization. Its source/dependency/configuration/style fingerprint belongs in font and layout cache keys. Keep build options in the checked build inputs so behavior changes invalidate the identity.
+
+EPUB XHTML/HTML/CSS source bytes are independent of fonts/layout and share a bounded cache: eight entries, 512 KiB total, 256 KiB per entry. Oversized resources retain direct ZIP streaming. Source bytes use the tracked allocation budget, and readers pin their entries. `cre_document_source_cache` attaches host persistence; only explicit `cre_document_checkpoint` calls write dirty entries, retaining failures for retry. Layout changes preserve source data.
 
 JPEG/PNG dimensions are probed from streams. The optional `decode_image` callback returns contiguous grayscale bytes through the supplied budgeted allocator. The port emits target-sized rows without a full color bitmap; `cre_document_image` prepares a resource without advancing the body anchor.
 

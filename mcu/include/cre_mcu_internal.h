@@ -13,6 +13,7 @@
 struct CreMcuFailure { int code; };
 void cre_mcu_checkpoint();
 void *cre_mcu_allocate(size_t bytes);
+void *cre_mcu_allocate_optional(size_t bytes);
 void cre_mcu_release(void *data);
 void cre_mcu_reset_error();
 int cre_mcu_error();

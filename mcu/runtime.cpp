@@ -152,6 +152,12 @@ void cre_mcu_release(void *data) {
     stats.used -= h->block.bytes;
     h->block.release(h->block.context, h);
 }
+void *cre_mcu_allocate_optional(size_t bytes) {
+    int previous = io_error;
+    void *data = cre_mcu_allocate(bytes);
+    if (!data && io_error == CRE_MEMORY) io_error = previous;
+    return data;
+}
 static void *imageResize(void *data, size_t bytes) {
     if (!bytes) { cre_mcu_release(data); return nullptr; }
     void *next = cre_mcu_allocate(bytes); if (!next) return nullptr;

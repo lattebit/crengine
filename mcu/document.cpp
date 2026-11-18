@@ -9,6 +9,7 @@
 #include "epubfmt.h"
 #include "lvfntman.h"
 #include "cre_stylesheets.h"
+#include "source_cache.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
@@ -21,6 +22,7 @@ struct cre_document {
     cre_layout layout{};
     cre_metadata metadata{};
     EpubIndex index;
+    std::shared_ptr<CreSourceCache> sources;
     LVStreamRef stream;
     std::unique_ptr<LVDocView> view;
     uint32_t chapter = UINT32_MAX;
@@ -185,6 +187,7 @@ extern "C" int cre_document_open(const char *path, const cre_layout *layout, cre
             d.metadata.format = 1; d.metadata.chapters = d.index.chapters.length();
             if (!d.metadata.chapters) return CRE_CONTENT;
             metadata(d, d.index.properties);
+            d.sources = cre_source_cache_create(d.index.archive, d.index.archive);
         } else {
             int result = load(d, 0); if (result != CRE_OK) return result;
         }
@@ -197,6 +200,15 @@ extern "C" void cre_document_close(cre_document *d) {
     if (!d) return;
     if (active == d) active = nullptr;
     delete d;
+}
+extern "C" int cre_document_source_cache(cre_document *d, const cre_source_cache *cache) {
+    if (!d || !cache) return CRE_INVALID;
+    if (d->sources) cre_source_cache_bind(*d->sources, *cache);
+    return CRE_OK;
+}
+extern "C" int cre_document_checkpoint(cre_document *d) {
+    if (!d) return CRE_INVALID;
+    return boundary([&]() -> int { if (d->sources) cre_source_cache_checkpoint(*d->sources); return CRE_OK; });
 }
 extern "C" int cre_document_metadata(cre_document *d, cre_metadata *out) {
     if (!d || !out) return CRE_INVALID;

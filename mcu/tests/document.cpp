@@ -9,6 +9,21 @@
 #include <algorithm>
 #include <string>
 #include <vector>
+#include <map>
+struct Sources {
+    std::map<uint64_t, std::vector<uint8_t>> records;
+    unsigned hits = 0, writes = 0;
+    bool fail_write = false;
+    static int read(void *context, uint64_t key, void *out, size_t bytes) {
+        auto &s = *static_cast<Sources *>(context); auto found = s.records.find(key);
+        if (found == s.records.end() || found->second.size() != bytes) return false;
+        std::memcpy(out, found->second.data(), bytes); ++s.hits; return true;
+    }
+    static int write(void *context, uint64_t key, const void *data, size_t bytes) {
+        auto &s = *static_cast<Sources *>(context); if (s.fail_write) return false;
+        auto *p = static_cast<const uint8_t *>(data); s.records[key].assign(p, p + bytes); ++s.writes; return true;
+    }
+};
 static int decodeImage(void *, const uint8_t *, size_t, uint32_t width, uint32_t height, const cre_mcu_image_memory *memory, cre_mcu_bitmap *out) {
     out->pixels = static_cast<uint8_t *>(memory->allocate(size_t(width) * height)); if (!out->pixels) return CRE_MEMORY;
     out->width = width; out->height = height; std::memset(out->pixels, 64, size_t(width) * height); return CRE_OK;
@@ -19,6 +34,30 @@ int main(int argc, char **argv) {
     assert(cre_mcu_initialize(&cfg) == CRE_OK);
     cre_layout layout{480, 640, 24, 400, 12, 100, 2, 0, 0, {}};
     std::strcpy(layout.font, argv[1]); std::vector<uint8_t> image(480 * 640 / 2);
+    {
+        Sources sources; cre_source_cache cache{&sources, Sources::read, Sources::write};
+        auto path = std::string(argv[2]) + "/fixture.epub"; std::vector<uint8_t> original;
+        for (unsigned attempt = 0; attempt < 2; ++attempt) {
+            cre_document *document = nullptr; assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
+            assert(cre_document_source_cache(document, &cache) == CRE_OK);
+            cre_anchor anchor{}; cre_page_state state{};
+            assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
+            if (!attempt) {
+                original = image; assert(!sources.writes && !sources.hits);
+                sources.fail_write = true; assert(cre_document_checkpoint(document) == CRE_OK && !sources.writes);
+                sources.fail_write = false; assert(cre_document_checkpoint(document) == CRE_OK && sources.writes);
+            } else assert(image == original && sources.hits);
+            unsigned writes = sources.writes;
+            assert(cre_document_checkpoint(document) == CRE_OK && sources.writes == writes);
+            // 中文：更改排版后复用源数据；不新增磁盘读取或重复写入。
+            // English: Reuse sources after layout changes without additional disk-cache reads or duplicate writes.
+            unsigned hits = sources.hits;
+            assert(cre_document_layout(document, &layout) == CRE_OK);
+            assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK && image == original);
+            assert(sources.hits == hits && sources.writes == writes);
+            cre_document_close(document); assert(!platform.files);
+        }
+    }
     for (const char *extension : {"epub", "txt", "html", "fb2", "md", "rtf"}) {
         cre_document *document = nullptr;
         auto path = std::string(argv[2]) + "/fixture." + extension;
