@@ -181,5 +181,5 @@ LVStreamRef cre_layout_stream(CreLayoutRecords records, uint64_t layout, bool re
     return static_cast<LayoutStream *>(stream.get())->open(restore) ? stream : LVStreamRef();
 }
 bool cre_layout_commit(LVStreamRef stream) {
-    auto *layout = dynamic_cast<LayoutStream *>(stream.get()); return layout && layout->commit();
+    return !stream.isNull() && static_cast<LayoutStream *>(stream.get())->commit();
 }

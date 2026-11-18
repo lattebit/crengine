@@ -16,5 +16,6 @@ struct CreLayoutRecords {
 };
 /// 每个布局键只有一个活动写入者；新建不会覆盖已提交根。/ One active writer per layout key; creation does not replace the committed root.
 LVStreamRef cre_layout_stream(CreLayoutRecords records, uint64_t layout, bool restore);
-/// 同步只写块，显式提交才发布根；取消或失败保留旧根。/ Flush writes blocks; explicit commit publishes the root, preserving the old root on cancellation or failure.
+/// 仅接收 cre_layout_stream 的返回值；显式提交才发布根，取消或失败保留旧根。
+/// Accept only streams created by cre_layout_stream; explicit commit publishes the root, preserving the old root on cancellation or failure.
 bool cre_layout_commit(LVStreamRef stream);
