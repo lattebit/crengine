@@ -30,7 +30,7 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 - EPUB 的 XHTML/HTML/CSS 源缓存独立于字体和布局，至多八项、合计 512 KiB、单项 256 KiB。超限资源仍流式读取原 ZIP；源字节计入统一分配预算，在途读者保护其引用。`cre_document_source_cache` 接入宿主持久化，`cre_document_checkpoint` 才写脏项；失败可以重试，排版变化不会清空源缓存。
 - `cre_document_prepare` 准备当前章节的块布局，首批只确定至少三页；后续翻页按需推进。`cre_document_extend` 保留分页器的行游标、未完成页、文档流和延后脚注，不重新分页已交付内容。`complete` 仅表示当前章节结束。当前块布局准备仍覆盖整个章节，TXT 仍构造完整 DOM；这两个阶段尚不是流式续算。分页、字体和图像操作均不得在 UI 绘制回调执行。
 - 像素缓冲由调用者分配和管理：白色为 15，左像素在高半字节。上游 `LVGrayDrawBuf` 的 4/8 位灰阶内部仍为一字节一像素，端口使用可释放的灰阶工作区再打包。不得把半字节输出缓冲直接传给该上游对象。
-- `cre_document_toc`、`resolve`、`prepare` 使用章节和内容路径，不使用全书页号作为持久进度。宿主借用像素期间必须保证缓冲不被重新使用。
+- `cre_document_toc`、`resolve`、`prepare` 使用章节和内容路径，不使用全书页号作为持久进度。宿主借用像素期间必须保证缓冲不被重新使用。`margin` 控制左右和顶部，`bottom_margin` 独立控制底部；零表示不预留额外页底空间。
 - 关闭顺序为文档、字体后端、平台上下文。取消检查会抛出内部异常，不能从平台的 C 回调抛出异常。
 - 当前预算统计覆盖 FreeType、共享字体源和灰阶临时缓冲。核心 DOM、C++ 对象及部分依赖分配尚未统一纳入该统计；宿主不能把此统计当作整个引擎的内存峰值或完整硬预算。
 - JPEG/PNG 仅做流式尺寸探测，实际像素由 `decode_image` 平台回调使用给定预算分配器生成。回调返回连续八位灰阶，端口按目标尺寸逐行交给绘图层；不需要完整彩色位图。`cre_document_image` 可准备文档内图片，保持正文位置。
@@ -42,6 +42,8 @@ Disable host tests for cross compilation. S31 uses the RISC-V GCC 15.2 toolchain
 `cre_mcu_build_identity()` requires no initialization. Its source/dependency/configuration/style fingerprint belongs in font and layout cache keys. Keep build options in the checked build inputs so behavior changes invalidate the identity.
 
 EPUB XHTML/HTML/CSS source bytes are independent of fonts/layout and share a bounded cache: eight entries, 512 KiB total, 256 KiB per entry. Oversized resources retain direct ZIP streaming. Source bytes use the tracked allocation budget, and readers pin their entries. `cre_document_source_cache` attaches host persistence; only explicit `cre_document_checkpoint` calls write dirty entries, retaining failures for retry. Layout changes preserve source data.
+
+`margin` controls the top and both sides; `bottom_margin` is independent, with zero reserving no extra space below the last complete line.
 
 JPEG/PNG dimensions are probed from streams. The optional `decode_image` callback returns contiguous grayscale bytes through the supplied budgeted allocator. The port emits target-sized rows without a full color bitmap; `cre_document_image` prepares a resource without advancing the body anchor.
 

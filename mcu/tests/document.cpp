@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
     assert(argc == 3);
     Platform platform; auto cfg = config(platform); cfg.decode_image = decodeImage;
     assert(cre_mcu_initialize(&cfg) == CRE_OK);
-    cre_layout layout{480, 640, 24, 400, 12, 100, 2, 0, 0, {}};
+    cre_layout layout{480, 640, 24, 400, 12, 100, 2, 0, 0, {}, 12};
     std::strcpy(layout.font, argv[1]); std::vector<uint8_t> image(480 * 640 / 2);
     {
         Sources sources; cre_source_cache cache{&sources, Sources::read, Sources::write};
@@ -88,6 +88,16 @@ int main(int argc, char **argv) {
             ink_before = ink;
         }
         assert(starts.size() > 4 && starts[1] - starts[0] == 48 && starts[2] - starts[1] == 48);
+        // 中文：底边距独立配置；取消预留空间能绘制更多完整行，左右边距保持。
+        // English: An independent bottom margin releases space for complete lines while side margins stay intact.
+        custom.bottom_margin = 96;
+        assert(cre_document_layout(document, &custom) == CRE_OK);
+        assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
+        auto reserved = std::count_if(image.begin() + 540 * 240, image.end(), [](uint8_t b) { return b != 255; });
+        custom.bottom_margin = 0;
+        assert(cre_document_layout(document, &custom) == CRE_OK);
+        assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
+        assert(std::count_if(image.begin() + 540 * 240, image.end(), [](uint8_t b) { return b != 255; }) > reserved);
         cre_document_close(document); assert(!platform.files);
     }
     for (const char *extension : {"epub", "txt", "html", "fb2", "md", "rtf"}) {

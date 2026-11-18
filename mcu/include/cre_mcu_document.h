@@ -22,6 +22,7 @@ typedef struct {
     uint32_t width, height, pixels, weight; ///< 页面与字体参数 / Page and font parameters
     uint32_t margin, line_percent, paragraph_quarters, indent, override_style; ///< 排版选项 / Typography options
     char font[768]; ///< 字体文件 / Font file
+    uint32_t bottom_margin; ///< 独立底部边距，零使用完整剩余高度 / Independent bottom margin; zero uses the full remaining height
 } cre_layout;
 typedef struct {
     uint32_t chapter; ///< 源章节 / Source chapter

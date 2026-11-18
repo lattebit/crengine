@@ -55,6 +55,7 @@ bool valid(const cre_layout *layout) {
     return layout && layout->width >= 64 && layout->width <= 2048 && !(layout->width & 1) && layout->height >= 64 && layout->height <= 2048
         && layout->pixels >= 8 && layout->pixels <= 128 && layout->weight >= 100 && layout->weight <= 900
         && layout->margin <= (layout->width - 32) / 2 && layout->margin <= (layout->height - 32) / 2
+        && layout->bottom_margin <= layout->height - layout->margin - 32
         && layout->line_percent >= 75 && layout->line_percent <= 250 && layout->paragraph_quarters <= 16 && layout->indent <= 8
         && layout->font[0] && std::memchr(layout->font, 0, sizeof(layout->font));
 }
@@ -84,7 +85,7 @@ int load(cre_document &d, uint32_t chapter) {
     view->setDefaultFontFace(lString8("mcu-reading")); view->setStatusFontFace(lString8("mcu-reading"));
     view->setSourcePath(Utf8ToUnicode(d.path.c_str()));
     view->setFontSize(d.layout.pixels); view->setPageHeaderInfo(0); view->setShowCover(false);
-    view->setPageMargins(lvRect(d.layout.margin, d.layout.margin, d.layout.margin, d.layout.margin));
+    view->setPageMargins(lvRect(d.layout.margin, d.layout.margin, d.layout.margin, d.layout.bottom_margin));
     view->setViewMode(DVM_PAGES, 1); view->Resize(d.layout.width, d.layout.height);
     auto props = LVCreatePropsContainer();
     // 中文：自定义模式的 CSS 已包含行高，不能再乘一次全局行距。
