@@ -104,3 +104,37 @@ for i, (metadata, expected) in enumerate(languages):
             if item.filename.endswith('.opf'):
                 data = data.replace(b'<dc:language>zh</dc:language>', metadata.encode())
             book.writestr(item, data)
+
+# 中文：迁移旧引擎有效目录场景；相对目录、转义路径、嵌套目录和无 BOM 的 UTF-16。
+# English: Retain valid legacy navigation scenarios: relative/escaped paths, nested contents and BOM-less UTF-16.
+for kind in ('ncx', 'nav', 'fallback'):
+    for codec in ('utf-8', 'utf-16-le', 'utf-16-be'):
+        container = '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OPS/pkg/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'
+        items = ''.join(f'<item id="c{i}" href="../text/part%20{i}%26x.xhtml" media-type="application/xhtml+xml"/>' for i in range(1, 5))
+        items += '<item id="ncx" href="../toc/book.ncx" media-type="application/x-dtbncx+xml"/><item id="nav" href="../toc/nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+        opf = '<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="' + ('2.0' if kind == 'ncx' else '3.0') + '"><metadata><dc:title>Title &amp; 中文</dc:title></metadata><manifest>' + items + '</manifest><spine toc="ncx">' + ''.join(f'<itemref idref="c{i}"/>' for i in range(1, 5)) + '</spine></package>'
+        points = '<navPoint><navLabel><text>Parent &amp; 中文😀</text></navLabel><content src="../text/part%201%26x.xhtml#start"/><navPoint><navLabel><text>Child &#84;wo</text></navLabel><content src="../text/part%202%26x.xhtml#start"/></navPoint></navPoint>'
+        points += ''.join(f'<navPoint><navLabel><text>Chapter {i}</text></navLabel><content src="../text/part%20{i}%26x.xhtml#start"/></navPoint>' for i in (3, 4))
+        ncx = '<!DOCTYPE ncx SYSTEM "https://invalid.example/never-read.dtd"><ncx><navMap>' + points + '</navMap></ncx>'
+        links = '<li><a href="../text/part%201%26x.xhtml#start">Parent &amp; 中文😀</a><ol><li><a href="../text/part%202%26x.xhtml#start">Child &#84;wo</a></li></ol></li>'
+        links += ''.join(f'<li><a href="../text/part%20{i}%26x.xhtml#start">Chapter {i}</a></li>' for i in (3, 4))
+        nav = '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="landmarks"><a href="../text/part%201%26x.xhtml">WRONG</a></nav><nav epub:type="toc"><ol>' + links + '</ol></nav></body></html>'
+        files = {'META-INF/container.xml': container, 'OPS/pkg/book.opf': opf, 'OPS/toc/book.ncx': ncx}
+        if kind != 'fallback':
+            files['OPS/toc/nav.xhtml'] = nav
+        files.update({f'OPS/text/part {i}&x.xhtml': f'<html><body><p id="start">Body chapter {i}. Text &amp; 中文.</p></body></html>' for i in range(1, 5)})
+        with zipfile.ZipFile(out / f'nav-{kind}-{codec}.epub', 'w', zipfile.ZIP_DEFLATED) as book:
+            book.writestr('mimetype', 'application/epub+zip')
+            for name, text in files.items():
+                declaration = '<?xml version="1.0" encoding="' + ('UTF-8' if codec == 'utf-8' else 'UTF-16') + '"?>'
+                book.writestr(name, (declaration + text).encode(codec))
+            book.writestr('unused.ttf', b'x' * (4 * 1024 * 1024 + 1))
+
+# 中文：预读只能使用空闲源缓存，不能挤掉热章节或打开超过单项上限的资源。
+# English: Prefetch uses only spare source capacity without evicting hot chapters or opening oversized resources.
+with zipfile.ZipFile(out / 'prefetch-capacity.epub', 'w', zipfile.ZIP_DEFLATED) as book:
+    book.writestr('mimetype', 'application/epub+zip')
+    book.writestr('META-INF/container.xml', '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>')
+    book.writestr('book.opf', '<package xmlns="http://www.idpf.org/2007/opf"><manifest>' + ''.join(f'<item id="c{i}" href="{i}.xhtml" media-type="application/xhtml+xml"/>' for i in range(4)) + '</manifest><spine>' + ''.join(f'<itemref idref="c{i}"/>' for i in range(4)) + '</spine></package>')
+    for i in range(4):
+        book.writestr(f'{i}.xhtml', '<html><body><p>' + 'A' * ((200 if i < 3 else 300) * 1024) + '</p></body></html>')

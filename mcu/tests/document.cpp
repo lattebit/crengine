@@ -88,6 +88,24 @@ int main(int argc, char **argv) {
         }
     }
     {
+        Sources sources; cre_source_cache cache{&sources, Sources::read, Sources::write};
+        auto path = std::string(argv[2]) + "/prefetch-capacity.epub";
+        cre_document *document = nullptr; assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
+        assert(cre_document_source_cache(document, &cache) == CRE_OK);
+        assert(cre_document_prefetch(document, 0) == CRE_OK && cre_document_prefetch(document, 1) == CRE_OK);
+        cre_mcu_stats_t before{}, after{}; cre_mcu_statistics(&before);
+        auto reads = platform.reads;
+        // 中文：容量不足或章节过大时跳过，既不读取新源也不淘汰已有两项。
+        // English: Full capacity and oversized chapters skip without reading new sources or evicting either hot entry.
+        platform.fail_read = true;
+        assert(cre_document_prefetch(document, 2) == CRE_OK && cre_document_prefetch(document, 3) == CRE_OK);
+        assert(cre_document_prefetch(document, 0) == CRE_OK && cre_document_prefetch(document, 1) == CRE_OK);
+        cre_mcu_statistics(&after); assert(platform.reads == reads && after.used == before.used);
+        platform.fail_read = false;
+        assert(cre_document_checkpoint(document) == CRE_OK && sources.writes == 2);
+        cre_document_close(document); assert(!platform.files);
+    }
+    {
         std::vector<uint8_t> reference;
         for (const char *encoding : {"utf-8", "utf-16-le", "utf-16-be"}) {
             auto path = std::string(argv[2]) + "/xml-" + encoding + ".epub";

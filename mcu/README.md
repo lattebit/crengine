@@ -49,6 +49,9 @@ EPUB XHTML/HTML/CSS source bytes are independent of fonts/layout and share a bou
 EPUB 的主语言只读取元数据下第一条 Dublin Core 语言，按命名空间 URI 识别并保留首条为空的语义。
 Read only the first Dublin Core language directly under EPUB metadata, resolving namespace URIs and retaining an empty first value.
 
+EPUB 索引和正文支持 UTF-8、带或不带 BOM 的 UTF-16 XML。UTF-16 按字节序合并代理对，跨读取块保留未完成字符；无效代理单元替换为 U+FFFD，不吞掉下一字符。导航测试同时覆盖 NCX、嵌套 EPUB3 目录、回退与转义相对路径。
+EPUB indexes and bodies accept UTF-8 and UTF-16 XML with or without a BOM. UTF-16 combines surrogate pairs using the detected byte order, retains incomplete characters across reads, and replaces invalid surrogate units with U+FFFD without consuming the next character. Navigation tests cover NCX, nested EPUB3 contents, fallback and escaped relative paths.
+
 `margin` controls the top and both sides; `bottom_margin` is independent, with zero reserving no extra space below the last complete line.
 
 JPEG/PNG dimensions are probed from streams. The optional `decode_image` callback returns contiguous grayscale bytes through the supplied budgeted allocator. The port emits target-sized rows without a full color bitmap; `cre_document_image` prepares a resource without advancing the body anchor.

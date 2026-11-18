@@ -1919,6 +1919,14 @@ const char *SniffBOM(const unsigned char * buf, int size) {
 int AutodetectCodePageUtf( const unsigned char * buf, int buf_size, char * cp_name )
 {
     const char *encoding = SniffBOM(buf, buf_size);
+#if CR_MCU
+    // 中文：XML 声明的字节排列可确定无 BOM 的 UTF-16；不能把其中的零字节当成 UTF-8。
+    // English: The XML declaration identifies BOM-less UTF-16 before its zero bytes are mistaken for UTF-8.
+    if (!encoding && buf_size >= 6) {
+        if (!memcmp(buf, "\x3c\x00\x3f\x00\x78\x00", 6)) encoding = "utf-16le";
+        else if (!memcmp(buf, "\x00\x3c\x00\x3f\x00\x78", 6)) encoding = "utf-16be";
+    }
+#endif
     if (encoding) {
         strcpy(cp_name, encoding); // NOLINT(clang-analyzer-security.insecureAPI.strcpy)
         return 1;

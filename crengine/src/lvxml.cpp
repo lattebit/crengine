@@ -447,6 +447,40 @@ int LVTextFileBase::ReadChars( lChar32 * buf, int maxsize )
             return dstlen;
         }
     case ce_utf16_be:
+#if CR_MCU
+    case ce_utf16_le:
+        {
+            // 中文：输出 UTF-32 标量；跨块代理对留待补齐，无效单元替换且不吞掉后续字符。
+            // English: Emit UTF-32 scalars, retain split surrogate pairs for refill, and replace invalid units without consuming following characters.
+            auto word = [&](int at) -> lUInt16 {
+                return m_enc_type == ce_utf16_be ? (m_buf[at] << 8) | m_buf[at + 1] :
+                                                  (m_buf[at + 1] << 8) | m_buf[at];
+            };
+            for (; count < maxsize; ++count) {
+                if (m_buf_pos + 1 >= m_buf_len) {
+                    if (m_buf_pos < m_buf_len && m_buf_fpos + m_buf_len == m_stream_size) {
+                        buf[count++] = 0xfffd; m_buf_pos = m_buf_len;
+                    }
+                    return count;
+                }
+                lChar32 ch = word(m_buf_pos);
+                if (ch >= 0xd800 && ch <= 0xdbff) {
+                    if (m_buf_pos + 3 >= m_buf_len) {
+                        if (m_buf_fpos + m_buf_len < m_stream_size) return count;
+                        ch = 0xfffd;
+                    } else {
+                        lChar32 low = word(m_buf_pos + 2);
+                        if (low >= 0xdc00 && low <= 0xdfff) {
+                            ch = 0x10000 + ((ch - 0xd800) << 10) + low - 0xdc00;
+                            m_buf_pos += 2;
+                        } else ch = 0xfffd;
+                    }
+                } else if (ch >= 0xdc00 && ch <= 0xdfff) ch = 0xfffd;
+                m_buf_pos += 2; buf[count] = ch;
+            }
+            return count;
+        }
+#else
         {
             for ( ; count<maxsize; count++ ) {
                 if ( m_buf_pos+1>=m_buf_len ) {
@@ -459,6 +493,7 @@ int LVTextFileBase::ReadChars( lChar32 * buf, int maxsize )
             }
             return count;
         }
+#endif
 
 #if GBK_ENCODING_SUPPORT == 1
     case ce_gbk:
@@ -782,6 +817,7 @@ int LVTextFileBase::ReadChars( lChar32 * buf, int maxsize )
     }
 #endif
 
+#if !CR_MCU
     case ce_utf16_le:
         {
             for ( ; count<maxsize; count++ ) {
@@ -795,6 +831,7 @@ int LVTextFileBase::ReadChars( lChar32 * buf, int maxsize )
             }
             return count;
         }
+#endif
     case ce_utf32_be:
         // support 24 bits only
         {
