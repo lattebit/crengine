@@ -3721,7 +3721,7 @@ lString32 LVExtractPath( lString32 pathName, bool appendEmptyPath )
         if ( pathName[i]=='/' || pathName[i]=='\\' )
             last_delim_pos = i;
     if ( last_delim_pos==-1 )
-#ifdef _LINUX
+#if defined(_LINUX) || CR_MCU
         return lString32(appendEmptyPath ? U"./" : U"");
 #else
         return lString32(appendEmptyPath ? U".\\" : U"");
@@ -3935,7 +3935,7 @@ lChar32 LVDetectPathDelimiter( lString32 pathName )
     for ( int i=0; i<pathName.length(); i++ )
         if ( pathName[i]=='/' || pathName[i]=='\\' )
             return pathName[i];
-#ifdef _LINUX
+#if defined(_LINUX) || CR_MCU
         return '/';
 #else
         return '\\';
@@ -3947,7 +3947,7 @@ char LVDetectPathDelimiter( lString8 pathName ) {
     for ( int i=0; i<pathName.length(); i++ )
         if ( pathName[i]=='/' || pathName[i]=='\\' )
             return pathName[i];
-#ifdef _LINUX
+#if defined(_LINUX) || CR_MCU
         return '/';
 #else
         return '\\';

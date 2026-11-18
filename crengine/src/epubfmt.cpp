@@ -9,6 +9,7 @@
 #endif
 
 #if CR_MCU
+#include "cre_mcu_internal.h"
 // 中文：语言用于字体策略；解析实际命名空间，忽略同名扩展元素并保留首项为空的语义。
 // English: Language drives font policy; resolve namespaces, ignore extension elements and retain an empty first value.
 static lString32 mcuPrimaryLanguage(ldomDocument *doc) {
@@ -1074,23 +1075,25 @@ LVStreamRef GetEpubCoverpage(LVContainerRef arc)
 
 // 中文：目录只保存资源锚点，未加载章节的标题也能立即显示。
 // English: Contents retain resource anchors so titles in unloaded chapters are immediately available.
-static void AddEpubIndexToc(EpubIndex &index, const lString32 &base, lString32 title, lString32 href, int depth) {
+static void AddEpubIndexToc(EpubIndex &index, LVHashTable<lString32, int> &chapters, const lString32 &base, lString32 title, lString32 href, int depth) {
     if (href.empty() || index.toc.length() >= 65536) return;
     EpubIndex::Toc entry;
     entry.title = title.trim(); entry.href = LVCombinePaths(base, DecodeHTMLUrlString(href)); entry.depth = depth;
     lString32 path = entry.href;
     int hash = path.pos(U"#");
     if (hash >= 0) path = path.substr(0, hash);
-    for (int i = 0; i < index.chapters.length(); ++i)
-        if (LVCombinePaths(index.codeBase, index.chapters[i].href) == path) { entry.chapter = i; break; }
+    chapters.get(path, entry.chapter);
     if (entry.chapter >= 0) index.toc.add(entry);
 }
-static void ReadEpubNavNodes(EpubIndex &index, ldomNode *node, const lString32 &base, int depth, int nesting) {
+static void ReadEpubNavNodes(EpubIndex &index, LVHashTable<lString32, int> &chapters, ldomNode *node, const lString32 &base, int depth, int nesting) {
     if (!node || !node->isElement() || nesting > 64) return;
     lString32 name = node->getNodeName();
-    if (name == U"a") AddEpubIndexToc(index, base, node->getText(), node->getAttributeValue("href"), depth);
+#if CR_MCU
+    cre_mcu_checkpoint();
+#endif
+    if (name == U"a") AddEpubIndexToc(index, chapters, base, node->getText(), node->getAttributeValue("href"), depth);
     if (name == U"ol" || name == U"ul") ++depth;
-    for (int i = 0; i < node->getChildCount(); ++i) ReadEpubNavNodes(index, node->getChildNode(i), base, depth, nesting + 1);
+    for (int i = 0; i < node->getChildCount(); ++i) ReadEpubNavNodes(index, chapters, node->getChildNode(i), base, depth, nesting + 1);
 }
 static ldomNode *FindEpubNav(ldomNode *node, bool exact, int nesting = 0) {
     if (!node || !node->isElement() || nesting > 64) return nullptr;
@@ -1101,8 +1104,11 @@ static ldomNode *FindEpubNav(ldomNode *node, bool exact, int nesting = 0) {
     }
     return nullptr;
 }
-static void ReadEpubNcxNodes(EpubIndex &index, ldomNode *node, const lString32 &base, int depth, int nesting) {
+static void ReadEpubNcxNodes(EpubIndex &index, LVHashTable<lString32, int> &chapters, ldomNode *node, const lString32 &base, int depth, int nesting) {
     if (!node || !node->isElement() || nesting > 64) return;
+#if CR_MCU
+    cre_mcu_checkpoint();
+#endif
     if (node->getNodeName() == U"navPoint") {
         lString32 label, href;
         for (int i = 0; i < node->getChildCount(); ++i) {
@@ -1111,11 +1117,22 @@ static void ReadEpubNcxNodes(EpubIndex &index, ldomNode *node, const lString32 &
             if (child->getNodeName() == U"navLabel") label = child->getText();
             else if (child->getNodeName() == U"content") href = child->getAttributeValue("src");
         }
-        AddEpubIndexToc(index, base, label, href, depth++);
+        AddEpubIndexToc(index, chapters, base, label, href, depth++);
     }
-    for (int i = 0; i < node->getChildCount(); ++i) ReadEpubNcxNodes(index, node->getChildNode(i), base, depth, nesting + 1);
+    for (int i = 0; i < node->getChildCount(); ++i) ReadEpubNcxNodes(index, chapters, node->getChildNode(i), base, depth, nesting + 1);
 }
 static void ReadEpubIndexToc(EpubIndex &index) {
+    // 中文：导航只临时建立资源查找表，避免每个标题扫描全部章节。
+    // English: Build a temporary resource lookup instead of scanning every chapter for each title.
+    LVHashTable<lString32, int> chapters(index.chapters.length());
+    for (int i = 0; i < index.chapters.length(); ++i) {
+#if CR_MCU
+        cre_mcu_checkpoint();
+#endif
+        auto path = LVCombinePaths(index.codeBase, index.chapters[i].href);
+        int first;
+        if (!chapters.get(path, first)) chapters.set(path, i);
+    }
     if (index.epub3 && !index.navHref.empty()) {
         lString32 path = LVCombinePaths(index.codeBase, index.navHref);
         auto stream = index.archive->OpenStream(path.c_str(), LVOM_READ);
@@ -1124,7 +1141,7 @@ static void ReadEpubIndexToc(EpubIndex &index) {
             if (doc) {
                 auto *nav = FindEpubNav(doc->getRootNode(), true);
                 if (!nav) nav = FindEpubNav(doc->getRootNode(), false);
-                ReadEpubNavNodes(index, nav, LVExtractPath(path), 0, 0);
+                ReadEpubNavNodes(index, chapters, nav, LVExtractPath(path, false), 0, 0);
             }
         }
     }
@@ -1132,7 +1149,7 @@ static void ReadEpubIndexToc(EpubIndex &index) {
         auto stream = index.archive->OpenStream(index.ncxHref.c_str(), LVOM_READ);
         if (!stream.isNull()) {
             std::unique_ptr<ldomDocument> doc(LVParseXMLStream(stream));
-            if (doc) ReadEpubNcxNodes(index, doc->getRootNode(), LVExtractPath(index.ncxHref), 1, 0);
+            if (doc) ReadEpubNcxNodes(index, chapters, doc->getRootNode(), LVExtractPath(index.ncxHref, false), 1, 0);
         }
     }
 }
