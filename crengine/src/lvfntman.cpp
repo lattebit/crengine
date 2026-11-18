@@ -1902,6 +1902,20 @@ public:
         return _BulletListItemFont;
     }
 
+#if CR_MCU
+    bool hasWeightAxis() const override {
+        if (!_face || !FT_HAS_MULTIPLE_MASTERS(_face)) return false;
+        FT_MM_Var *axes = NULL;
+        if (FT_Get_MM_Var(_face, &axes) != FT_Err_Ok || !axes) return false;
+        bool weight = false;
+        for (FT_UInt i = 0; i < axes->num_axis; ++i)
+            if (axes->axis[i].tag == FT_MAKE_TAG('w', 'g', 'h', 't') && axes->axis[i].minimum < axes->axis[i].maximum)
+                weight = true;
+        FT_DONE_MM_VAR(_library, axes);
+        return weight;
+    }
+#endif
+
     /// returns font weight
     virtual int getWeight() const {
         if (_synth_weight > 0) return _synth_weight;

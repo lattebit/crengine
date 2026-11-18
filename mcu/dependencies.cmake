@@ -1,16 +1,30 @@
 # 中文：一个固件只链接一份依赖；裁剪配置不修改固定的第三方工作树。
 # English: Link one copy of each dependency; trimming never modifies pinned third-party trees.
 set(CRE_PORTS "${CMAKE_CURRENT_LIST_DIR}/ports")
+# 中文：在构建目录应用单点失败清理修正，保留来源许可和固定 submodule。
+# English: Apply the failure-cleanup fix in the build directory, retaining licenses and the pinned submodule.
+file(READ "${CRE_DEPS}/freetype/src/truetype/ttgxvar.c" CRE_GX_SOURCE)
+set(CRE_GX_ANCHOR "num_axes = blend->mmvar->num_axis;")
+string(REGEX MATCHALL "num_axes = blend->mmvar->num_axis" CRE_GX_MATCHES "${CRE_GX_SOURCE}")
+list(LENGTH CRE_GX_MATCHES CRE_GX_COUNT)
+if(NOT CRE_GX_COUNT EQUAL 1)
+    message(FATAL_ERROR "Review FreeType variable-font cleanup before updating its source")
+endif()
+string(REPLACE "${CRE_GX_ANCHOR}" "num_axes = blend->mmvar ? blend->mmvar->num_axis : 0;" CRE_GX_SOURCE "${CRE_GX_SOURCE}")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ttgxvar_mcu.c" CONTENT "${CRE_GX_SOURCE}")
+file(READ "${CRE_DEPS}/freetype/src/truetype/truetype.c" CRE_TT_SOURCE)
+string(REPLACE "#include \"ttgxvar.c\"" "#include \"${CMAKE_CURRENT_BINARY_DIR}/ttgxvar_mcu.c\"" CRE_TT_SOURCE "${CRE_TT_SOURCE}")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/truetype_mcu.c" CONTENT "${CRE_TT_SOURCE}")
 add_library(cre_freetype STATIC
     "${CRE_PORTS}/ftbase.c" "${CRE_DEPS}/freetype/src/base/ftsynth.c" "${CRE_DEPS}/freetype/src/base/ftstroke.c" "${CRE_DEPS}/freetype/src/base/ftbbox.c"
     "${CRE_DEPS}/freetype/src/base/ftbitmap.c" "${CRE_DEPS}/freetype/src/base/ftdebug.c"
     "${CRE_DEPS}/freetype/src/base/ftglyph.c" "${CRE_DEPS}/freetype/src/base/ftinit.c"
     "${CRE_DEPS}/freetype/src/base/ftmm.c" "${CRE_DEPS}/freetype/src/base/ftsystem.c"
-    "${CRE_DEPS}/freetype/src/sfnt/sfnt.c" "${CRE_DEPS}/freetype/src/truetype/truetype.c"
+    "${CRE_DEPS}/freetype/src/sfnt/sfnt.c" "${CMAKE_CURRENT_BINARY_DIR}/truetype_mcu.c"
     "${CRE_DEPS}/freetype/src/smooth/smooth.c" "${CRE_DEPS}/freetype/src/cff/cff.c"
     "${CRE_DEPS}/freetype/src/psaux/psaux.c" "${CRE_DEPS}/freetype/src/pshinter/pshinter.c"
     "${CRE_DEPS}/freetype/src/psnames/psnames.c")
-target_include_directories(cre_freetype PUBLIC "${CRE_DEPS}/freetype/include" PRIVATE "${CRE_PORTS}")
+target_include_directories(cre_freetype PUBLIC "${CRE_DEPS}/freetype/include" PRIVATE "${CRE_PORTS}" "${CRE_DEPS}/freetype/src/truetype")
 target_compile_definitions(cre_freetype PRIVATE FT2_BUILD_LIBRARY
     FT_CONFIG_OPTIONS_H="cre_ftoptions.h" FT_CONFIG_MODULES_H="cre_ftmodule.h")
 # 中文：灰阶栅格器仅在同步调用期间借用栈池；GCC 15 的逃逸提示保留为警告。

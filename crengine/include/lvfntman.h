@@ -552,6 +552,12 @@ public:
     /// set OpenType features (bitmap)
     virtual void setFeatures( int features ) { }
 
+#if CR_MCU
+    /// 中文：按标签识别可变字重，不将光学尺寸轴误认为字重。
+    /// English: Identify variable weight by tag without confusing optical size with weight.
+    virtual bool hasWeightAxis() const { return false; }
+#endif
+
     /// hash of the active variable-font axis values; 0 for static fonts or no variations
     virtual lUInt32 getVariationHash() const { return 0; }
 

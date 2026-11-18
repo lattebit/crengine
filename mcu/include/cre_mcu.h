@@ -57,8 +57,9 @@ void cre_mcu_shutdown(void);
 void cre_mcu_statistics(cre_mcu_stats_t *out);
 /// 直接使用字体后端生成一行 4bpp，白色 15、高半字节在左；不创建文档。
 /// Render one line through the font backend, 4bpp white=15 with left pixels in high nibbles; no document is created.
+/// 可选 weight_axis 返回是否存在 wght 轴。/ Optional weight_axis reports the presence of a wght axis.
 int cre_mcu_font_preview(const char *path, const char *text, uint32_t pixels, uint32_t weight,
-                         uint8_t *output, uint32_t width, uint32_t height, uint32_t *missing);
+                         uint8_t *output, uint32_t width, uint32_t height, uint32_t *missing, uint32_t *weight_axis);
 #ifdef __cplusplus
 }
 #endif

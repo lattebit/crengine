@@ -65,6 +65,9 @@ The build excludes system font discovery, mmap, signal handling, color page back
 - FriBidi 只编译 Unicode 排序需要的模块。`ports/harfbuzz.cc` 在加载标准库后隔离 Picolibc `_S` 宏，避免污染 HarfBuzz 的字符串表宏。
 - `cr3gui/data` 中的上游样式在配置时嵌入，保持 EPUB 章节分页、HTML 表格及列表语义；无需在设备上部署 CSS 文件。
 
+FreeType 可变字体初始化失败时，构建目录中的 `ttgxvar_mcu.c` 修正空 `mmvar` 的清理；配置阶段校验唯一修改位置。预览同时返回按 `wght` 标签识别的字重轴能力，不把 Literata 的 `opsz` 当成字重。
+The build applies a guarded `mmvar` cleanup fix to generated `ttgxvar_mcu.c`, checking the unique source anchor. Preview also reports weight-axis support by the `wght` tag rather than mistaking Literata’s `opsz` axis for weight.
+
 Port copies retain their upstream licenses. The FreeType hash port fixes allocation-failure cleanup; utf8proc bridges its public `int *` state to a local `utf8proc_int32_t` on S31. Regenerate FriBidi tables with `python3 mcu/generate_fribidi.py` after upgrading its pinned sources. Upstream user-agent CSS is embedded at configuration time.
 
 ## 可复跑测试 / Reproducible tests
@@ -91,3 +94,6 @@ For Linux sanitizer builds, add these options and run the same CTest suite:
 
 所有第三方代码及生成表继续遵守原始许可；分发静态固件时需要同时遵守 crengine 的 GPL 条款以及各依赖许可。
 Retain upstream licenses for dependencies and generated tables. Static firmware distribution must comply with crengine's GPL terms and each dependency's license.
+
+使用可变字体重复同一故障矩阵：`build/mcu-test/cre_mcu_font_test /path/to/variable.ttf variable`。
+Repeat the fault matrix with a variable font using the command above.

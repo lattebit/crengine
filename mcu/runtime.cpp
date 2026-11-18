@@ -250,8 +250,9 @@ extern "C" void cre_mcu_shutdown(void) {
 }
 extern "C" void cre_mcu_statistics(cre_mcu_stats_t *out) { if (out) *out = stats; }
 extern "C" int cre_mcu_font_preview(const char *path, const char *text, uint32_t pixels, uint32_t weight,
-                                    uint8_t *output, uint32_t width, uint32_t height, uint32_t *missing) {
+                                    uint8_t *output, uint32_t width, uint32_t height, uint32_t *missing, uint32_t *weight_axis) {
     if (missing) *missing = 0;
+    if (weight_axis) *weight_axis = 0;
     if (!initialized || !path || !text || !output || !missing || !width || width > 2048 || (width & 1)
         || !height || height > 256 || pixels < 8 || pixels > 128 || weight < 100 || weight > 900 || std::strlen(text) > 2048) return CRE_INVALID;
     io_error = CRE_OK;
@@ -261,6 +262,7 @@ extern "C" int cre_mcu_font_preview(const char *path, const char *text, uint32_t
             return io_error == CRE_OK ? CRE_CONTENT : io_error;
         temporary.font = fontMan->GetFont(pixels, weight, false, css_ff_sans_serif, lString8("mcu-preview"), 0, TemporaryFont::id);
         if (temporary.font.isNull()) return CRE_MEMORY;
+        if (weight_axis) *weight_axis = temporary.font->hasWeightAxis();
         lString32 string = Utf8ToUnicode(text);
         for (int i = 0; i < string.length(); ++i) {
             cre_mcu_checkpoint(); LVFont::glyph_info_t info{};
