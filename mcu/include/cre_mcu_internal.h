@@ -26,5 +26,6 @@ class LVImageSource;
 class ldomDocument;
 class ldomNode;
 ldomNode *cre_mcu_svg_image_node(ldomNode *node);
+LVImageSource *cre_mcu_svg_image_source(ldomNode *node);
 LVImageSource *cre_mcu_image_source(LVStreamRef stream, ldomDocument *doc, ldomNode *node);
 int cre_mcu_decode_image(const uint8_t *data, size_t bytes, uint32_t width, uint32_t height, cre_mcu_bitmap *out);

@@ -2414,7 +2414,7 @@ LVImageSourceRef LVCreateStreamImageSource( LVStreamRef stream, ldomDocument * d
     if ( stream.isNull() )
         return ref;
 #if CR_MCU
-    if (auto *image = cre_mcu_svg_image_node(node)) return image->getObjectImageSource();
+    if (auto *image = cre_mcu_svg_image_source(node)) return LVImageSourceRef(image);
 #endif
     lUInt8 hdr[256];
     lvsize_t bytesRead = 0;

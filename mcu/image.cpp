@@ -127,3 +127,42 @@ ldomNode *cre_mcu_svg_image_node(ldomNode *node) {
     }
     return image;
 }
+
+namespace {
+// 中文：保留 SVG 视口的固有尺寸，实际目标像素仍由共享图片解码器生成。
+// English: Preserve intrinsic SVG viewport dimensions while the shared decoder produces target pixels.
+class SvgImage : public LVImageSource {
+    LVImageSourceRef source;
+    ldomNode *node;
+    int width, height;
+public:
+    SvgImage(LVImageSourceRef image, ldomNode *n, int w, int h) : source(image), node(n), width(w), height(h) {}
+    ldomDocument *GetSourceDocument() override { return node->getDocument(); }
+    ldomNode *GetSourceNode() override { return node; }
+    LVStream *GetSourceStream() override { return source->GetSourceStream(); }
+    void Compact() override { source->Compact(); }
+    int GetWidth() const override { return width; }
+    int GetHeight() const override { return height; }
+    bool IsScalable() const override { return true; }
+    bool Decode(LVImageDecoderCallback *callback) override { return source->Decode(callback); }
+};
+}
+LVImageSource *cre_mcu_svg_image_source(ldomNode *node) {
+    auto *child = cre_mcu_svg_image_node(node); if (!child) return nullptr;
+    auto image = child->getObjectImageSource(); if (image.isNull()) return nullptr;
+    auto viewbox = UnicodeToUtf8(node->getAttributeValue("viewBox")); double x, y, w, h;
+    if (std::sscanf(viewbox.c_str(), "%lf %lf %lf %lf", &x, &y, &w, &h) != 4) return nullptr;
+    double width = w, height = h;
+    for (const char *attribute : {"width", "height"}) {
+        auto value = UnicodeToUtf8(node->getAttributeValue(attribute));
+        if (value.empty() || value.endsWith("%")) continue;
+        double length; char unit[3] = {}, extra;
+        int count = std::sscanf(value.c_str(), "%lf%2s %c", &length, unit, &extra);
+        if ((count != 1 && (count != 2 || std::strcmp(unit, "px"))) || !std::isfinite(length) || length < 1 || length > 1000000) return nullptr;
+        (attribute[0] == 'w' ? width : height) = length;
+    }
+    if (width < 1 || height < 1 || width > 1000000 || height > 1000000 ||
+        std::abs(width * h - height * w) > 0.001 || image->GetWidth() <= 0 || image->GetHeight() <= 0 ||
+        std::abs(double(image->GetWidth()) * h - double(image->GetHeight()) * w) > 0.001) return nullptr;
+    return new SvgImage(image, node, int(width), int(height));
+}

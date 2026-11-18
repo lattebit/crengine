@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
         assert(cre_document_open(path.c_str(), &layout, &document) == CRE_OK);
         cre_anchor anchor{}; cre_page_state state{};
         assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
-        size_t count = 0; auto hits = cre_document_hits(document, &count); assert(count && hits[0].image && *hits[0].href);
+        size_t count = 0; auto hits = cre_document_hits(document, &count); assert(count && hits[0].image && *hits[0].href && hits[0].width == 128);
         assert(cre_document_image(document, hits[0].href, image.data(), image.size()) == CRE_OK);
         assert(std::count(image.begin(), image.end(), uint8_t(0x44)) > 10000);
         cre_document_close(document); assert(!platform.files);
