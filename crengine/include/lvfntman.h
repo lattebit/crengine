@@ -874,6 +874,9 @@ public:
     }
 };
 
+#if !CR_MCU
+// 中文：MCU 不声明已移除实现的旧位图/Windows 基类，避免优化后的类型检查引用缺失 RTTI。
+// English: Omit the obsolete bitmap/Windows base with no implementation from MCU builds and optimized type checks.
 class LVBaseFont : public LVFont
 {
 protected:
@@ -892,6 +895,8 @@ public:
                        lUInt32 flags=0, int letter_spacing=0, int width=-1,
                        int text_decoration_back_gap=0, int target_w=-1, int target_h=-1, SVGGlyphsCollector * svg_collector=NULL );
 };
+
+#endif
 
 #if (USE_FREETYPE!=1) && (USE_BITMAP_FONTS==1)
 /* C++ wrapper class */
