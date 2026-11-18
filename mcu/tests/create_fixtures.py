@@ -49,3 +49,20 @@ with zipfile.ZipFile(out / "cover.epub", "w") as book:
     book.writestr("content.opf", '<package version="3.0" xmlns="http://www.idpf.org/2007/opf"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Cover fixture</dc:title></metadata><manifest><item id="text" href="image.html" media-type="application/xhtml+xml"/><item id="cover" href="image.png" media-type="image/png" properties="cover-image"/></manifest><spine><itemref idref="text"/></spine></package>')
     book.writestr("image.html", (out / "image.html").read_bytes())
     book.writestr("image.png", png)
+
+# 中文：XML 声明不区分编码名大小写，UTF-16 字节序由 BOM 确定。
+# English: XML encoding names are case-insensitive and UTF-16 byte order follows its BOM.
+for codec in ('utf-8', 'utf-16-le', 'utf-16-be'):
+    with zipfile.ZipFile(out / 'fixture.epub') as source, zipfile.ZipFile(out / ('xml-' + codec + '.epub'), 'w', zipfile.ZIP_DEFLATED) as book:
+        for item in source.infolist():
+            data = source.read(item)
+            if item.filename.endswith(('.xml', '.opf', '.xhtml')):
+                text = data.decode('utf-8')
+                if text.startswith('<?xml'):
+                    text = text.split('?>', 1)[1]
+                encoding = 'UTF-8' if codec == 'utf-8' else 'UTF-16'
+                data = ('<?xml version="1.0" encoding="' + encoding + '"?>' + text).encode(codec)
+                data = (b'\xff\xfe' if codec == 'utf-16-le' else b'\xfe\xff' if codec == 'utf-16-be' else b'') + data
+            book.writestr(item.filename, data, compress_type=zipfile.ZIP_STORED if item.filename == 'mimetype' else zipfile.ZIP_DEFLATED)
+
+(out / "line-height.html").write_text('<html><body>' + '<p>ABC</p>' * 80 + '</body></html>')

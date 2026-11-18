@@ -87,7 +87,9 @@ int load(cre_document &d, uint32_t chapter) {
     view->setPageMargins(lvRect(d.layout.margin, d.layout.margin, d.layout.margin, d.layout.margin));
     view->setViewMode(DVM_PAGES, 1); view->Resize(d.layout.width, d.layout.height);
     auto props = LVCreatePropsContainer();
-    props->setInt(PROP_INTERLINE_SPACE, d.layout.line_percent); props->setInt(PROP_FONT_BASE_WEIGHT, d.layout.weight);
+    // 中文：自定义模式的 CSS 已包含行高，不能再乘一次全局行距。
+    // English: Custom CSS already specifies line height; avoid applying the global multiplier twice.
+    props->setInt(PROP_INTERLINE_SPACE, d.layout.override_style ? 100 : d.layout.line_percent); props->setInt(PROP_FONT_BASE_WEIGHT, d.layout.weight);
     view->propsApply(props);
     char css[512];
     std::snprintf(css, sizeof(css), "body { margin: 0; } p { margin: 0 0 %.2fem 0; text-indent: %uem; }", d.layout.paragraph_quarters / 4.0, unsigned(d.layout.indent));

@@ -58,6 +58,38 @@ int main(int argc, char **argv) {
             cre_document_close(document); assert(!platform.files);
         }
     }
+    {
+        std::vector<uint8_t> reference;
+        for (const char *encoding : {"utf-8", "utf-16-le", "utf-16-be"}) {
+            auto path = std::string(argv[2]) + "/xml-" + encoding + ".epub";
+            cre_document *document = nullptr;
+            int rc = cre_document_open(path.c_str(), &layout, &document);
+            if (rc != CRE_OK) std::fprintf(stderr, "XML encoding %s open=%d\n", encoding, rc);
+            assert(rc == CRE_OK);
+            cre_anchor anchor{}; cre_page_state state{};
+            assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
+            if (reference.empty()) reference = image; else assert(reference == image);
+            cre_document_close(document); assert(!platform.files);
+        }
+    }
+    {
+        // 中文：CSS 自定义行高只应用一次，200% 的 24px 文本行距应为 48px。
+        // English: Apply custom CSS line height once: 200% of 24px must advance by 48px.
+        auto custom = layout; custom.override_style = 1; custom.line_percent = 200; custom.paragraph_quarters = 0;
+        auto path = std::string(argv[2]) + "/line-height.html";
+        cre_document *document = nullptr; assert(cre_document_open(path.c_str(), &custom, &document) == CRE_OK);
+        cre_anchor anchor{}; cre_page_state state{};
+        assert(cre_document_prepare(document, &anchor, 0, image.data(), image.size(), &state) == CRE_OK);
+        std::vector<int> starts; bool ink_before = false;
+        for (int y = 0; y < 640; ++y) {
+            bool ink = false;
+            for (int x = 0; x < 240; ++x) ink |= image[y * 240 + x] != 255;
+            if (ink && !ink_before) starts.push_back(y);
+            ink_before = ink;
+        }
+        assert(starts.size() > 4 && starts[1] - starts[0] == 48 && starts[2] - starts[1] == 48);
+        cre_document_close(document); assert(!platform.files);
+    }
     for (const char *extension : {"epub", "txt", "html", "fb2", "md", "rtf"}) {
         cre_document *document = nullptr;
         auto path = std::string(argv[2]) + "/fixture." + extension;

@@ -1004,11 +1004,14 @@ void LVTextFileBase::Reset()
 void LVTextFileBase::SetCharset( const lChar32 * name )
 {
     m_encoding_name = lString32( name );
+    m_encoding_name.lowercase();
     if ( m_encoding_name == "utf-8" ) {
         m_enc_type = ce_utf8;
         SetCharsetTable( NULL );
     } else if ( m_encoding_name == "utf-16" ) {
-        m_enc_type = ce_utf16_le;
+        // 中文：通用声明不能覆盖 BOM 检测出的字节序。
+        // English: A generic declaration must retain byte order detected from the BOM.
+        if (m_enc_type != ce_utf16_be) m_enc_type = ce_utf16_le;
         SetCharsetTable( NULL );
 #if GBK_ENCODING_SUPPORT == 1
     } else if ( m_encoding_name == "gbk" || m_encoding_name == "gb2312" || m_encoding_name == "cp936" || m_encoding_name == "cp-936") {
@@ -1040,7 +1043,7 @@ void LVTextFileBase::SetCharset( const lChar32 * name )
         m_enc_type = ce_utf16_be;
         SetCharsetTable( NULL );
     } else if ( m_encoding_name == "utf-32" ) {
-        m_enc_type = ce_utf32_le;
+        if (m_enc_type != ce_utf32_be) m_enc_type = ce_utf32_le;
         SetCharsetTable( NULL );
     } else if ( m_encoding_name == "utf-32le" ) {
         m_enc_type = ce_utf32_le;
@@ -2957,7 +2960,7 @@ bool LVXMLParser::CheckFormat()
             int encpos;
             if ( res && (encpos=s.pos("encoding=\"")) >= 0 ) {
                 lString32 encname = s.substr( encpos+10, 20 );
-                int endpos = s.pos("\"");
+                int endpos = encname.pos("\"");
                 if ( endpos>0 ) {
                     encname.erase( endpos, encname.length() - endpos );
                     SetCharset( encname.c_str() );
